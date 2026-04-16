@@ -135,22 +135,39 @@ export interface RcmsManual {
   created_at: string;
 }
 
-export interface EvidenceChunk {
-  manual_id: string;
-  display_name: string;
-  page: number | null;
-  section_title: string | null;
-  excerpt: string;
-  confidence: number;
-  chunk_id?: string;
-}
+export type QuestionType = "rcms_procedure" | "legal_policy" | "mixed";
 
 export type AnswerStatus =
   | "answered_with_evidence"
   | "not_found_in_uploaded_manuals";
 
+/** Evidence from either a legal document or an RCMS manual. */
+export interface EvidenceChunk {
+  source_type: "legal" | "rcms";
+
+  // RCMS manual fields
+  manual_id?: string;
+  display_name?: string;
+
+  // Legal document fields
+  law_name?: string;
+  article_number?: string;
+  article_title?: string;
+
+  // Common
+  page?: number | null;
+  section_title?: string | null;
+  excerpt: string;
+  confidence: number;
+  chunk_id?: string;
+}
+
 export interface RcmsQaResponse {
+  question_type: QuestionType;
   short_answer: string;
+  conclusion: string | null;
+  legal_basis: string | null;
+  rcms_steps: string | null;
   detailed_explanation: string;
   evidence: EvidenceChunk[];
   found_in_manual: boolean;
@@ -163,7 +180,11 @@ export interface RcmsQaSession {
   id: string;
   question: string;
   answer: {
+    question_type?: QuestionType;
     short_answer: string;
+    conclusion?: string | null;
+    legal_basis?: string | null;
+    rcms_steps?: string | null;
     detailed_explanation: string;
     evidence: EvidenceChunk[];
     found_in_manual: boolean;
@@ -171,6 +192,22 @@ export interface RcmsQaSession {
   };
   model_version: string;
   prompt_version: string;
+  created_at: string;
+}
+
+// ─── Legal documents ──────────────────────────────────────────────────────────
+
+export interface LegalDoc {
+  id: string;
+  law_name: string;
+  law_mst: string;
+  source_type: string;   // "api" | "upload"
+  promulgation_date: string | null;
+  effective_date: string | null;
+  total_articles: number | null;
+  total_chunks: number | null;
+  sync_status: ParseStatus;
+  sync_error: string | null;
   created_at: string;
 }
 

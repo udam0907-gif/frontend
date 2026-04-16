@@ -20,7 +20,7 @@ python-docx==1.1.2
 docxtpl==0.19.0
 PyMuPDF==1.25.1
 pdfplumber==0.11.4
-Pillow==11.0.0
+Pillow>=10.3.0,<11.0.0
 pytesseract==0.3.13
 openpyxl==3.1.5
 

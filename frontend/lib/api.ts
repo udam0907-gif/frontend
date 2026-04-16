@@ -9,6 +9,7 @@ import type {
   RcmsManual,
   RcmsQaResponse,
   RcmsQaSession,
+  LegalDoc,
   DashboardStats,
   PaginatedResponse,
 } from "./types";
@@ -161,6 +162,29 @@ export const rcmsApi = {
 
   deleteManual: (id: string) =>
     apiClient.delete(`/rcms/manuals/${id}`).then((r) => r.data),
+};
+
+// ─── Legal documents ──────────────────────────────────────────────────────────
+
+export const legalApi = {
+  list: () =>
+    apiClient.get<LegalDoc[]>("/rcms/laws").then((r) => r.data),
+
+  syncLaw: (lawName: string, lawMst?: string) =>
+    apiClient
+      .post<{ message: string; law_name: string }>("/rcms/laws/sync", {
+        law_name: lawName,
+        law_mst: lawMst ?? null,
+      })
+      .then((r) => r.data),
+
+  syncDefaults: () =>
+    apiClient
+      .post<{ message: string; laws: string[] }>("/rcms/laws/sync-defaults")
+      .then((r) => r.data),
+
+  delete: (id: string) =>
+    apiClient.delete(`/rcms/laws/${id}`).then((r) => r.data),
 };
 
 // ─── Projects stats (aggregated on frontend from list) ───────────────────────

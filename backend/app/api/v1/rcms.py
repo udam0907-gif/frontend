@@ -202,7 +202,7 @@ async def _parse_manual_background(
             await db.flush()
 
             rag = RagService(get_llm_service())
-            chunk_count = await rag.ingest_manual(
+            chunk_count, page_count, section_count = await rag.ingest_manual(
                 db=db,
                 manual_id=manual_id,
                 file_path=file_path,
@@ -211,6 +211,7 @@ async def _parse_manual_background(
 
             manual.parse_status = ParseStatus.completed
             manual.total_chunks = chunk_count
+            manual.total_sections = section_count
             await db.commit()
             logger.info("manual_parse_completed", manual_id=str(manual_id), chunks=chunk_count)
 

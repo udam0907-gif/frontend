@@ -60,3 +60,9 @@ class ParseStatus(str, Enum):
     processing = "processing"
     completed = "completed"
     failed = "failed"
+
+
+class QuestionType(str, Enum):
+    rcms_procedure = "rcms_procedure"
+    legal_policy = "legal_policy"
+    mixed = "mixed"

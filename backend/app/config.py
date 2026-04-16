@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     rag_max_chunks: int = 5
     rag_min_confidence: float = 0.75
 
+    # Korea Law Open API (https://www.law.go.kr/LSW/openApi.do)
+    # OC = registered email — register at law.go.kr to get free API access
+    law_api_oc: str = ""
+    law_api_base_url: str = "https://www.law.go.kr/DRF"
+
     # Logging
     log_level: str = "INFO"
     log_format: Literal["json", "text"] = "json"

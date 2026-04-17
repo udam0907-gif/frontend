@@ -135,15 +135,25 @@ export interface RcmsManual {
   created_at: string;
 }
 
-export type QuestionType = "rcms_procedure" | "legal_policy" | "mixed";
+export type QuestionType = "rcms_procedure" | "legal_policy" | "mixed" | "definition";
 
 export type AnswerStatus =
   | "answered_with_evidence"
   | "not_found_in_uploaded_manuals";
 
+export type AnswerStatusType =
+  | "answered_with_direct_evidence"
+  | "answered_with_mixed_sources"
+  | "related_context_only"
+  | "insufficient_evidence"
+  | "not_found_in_uploaded_materials"
+  | "routing_error";
+
 /** Evidence from either a legal document or an RCMS manual. */
 export interface EvidenceChunk {
   source_type: "legal" | "rcms";
+  evidence_tier?: 1 | 2 | 3;
+  source_label?: string; // "법령 원문 근거" | "공식 FAQ/운영안내 근거" | "일반 참고 문맥"
 
   // RCMS manual fields
   manual_id?: string;
@@ -160,18 +170,58 @@ export interface EvidenceChunk {
   excerpt: string;
   confidence: number;
   chunk_id?: string;
+  is_decisive?: boolean;
+}
+
+export interface DebugInfo {
+  question_type: string;
+  normalized_query: string;
+  expanded_queries: string[];
+  routing_decision: string;
+  rcms_candidates: Array<{
+    chunk_id: string;
+    display_name: string;
+    page: number | null;
+    section: string;
+    similarity: number;
+    excerpt: string;
+  }>;
+  legal_candidates: Array<{
+    chunk_id: string;
+    law_name: string;
+    article: string;
+    similarity: number;
+    excerpt: string;
+  }>;
+  rule_cards: unknown[];
+  answerability: {
+    status: string;
+    has_direct_evidence: boolean;
+    explanation: string;
+  };
 }
 
 export interface RcmsQaResponse {
   question_type: QuestionType;
   short_answer: string;
   conclusion: string | null;
+  conditions_or_exceptions: string | null;
   legal_basis: string | null;
   rcms_steps: string | null;
   detailed_explanation: string;
+  further_confirmation_needed: boolean;
+  confidence: "high" | "medium" | "low";
   evidence: EvidenceChunk[];
   found_in_manual: boolean;
-  answer_status: AnswerStatus;
+  answer_status: string;
+  answer_status_type: AnswerStatusType;
+  question_understanding?: {
+    question_type: QuestionType;
+    normalized_query: string;
+    expanded_queries: string[];
+    routing_decision: string;
+  };
+  debug?: DebugInfo | null;
   model_version: string;
   prompt_version: string;
 }
@@ -183,12 +233,13 @@ export interface RcmsQaSession {
     question_type?: QuestionType;
     short_answer: string;
     conclusion?: string | null;
+    conditions_or_exceptions?: string | null;
     legal_basis?: string | null;
     rcms_steps?: string | null;
     detailed_explanation: string;
     evidence: EvidenceChunk[];
     found_in_manual: boolean;
-    answer_status: AnswerStatus;
+    answer_status: string;
   };
   model_version: string;
   prompt_version: string;

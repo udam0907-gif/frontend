@@ -51,7 +51,6 @@ async def init_db() -> None:
         from app.models import (  # noqa: F401
             document,
             expense,
-            legal,
             project,
             rcms,
             template,

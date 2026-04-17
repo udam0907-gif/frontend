@@ -34,7 +34,6 @@ class RcmsManual(Base, TimestampMixin):
     )
     total_pages: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_chunks: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    total_sections: Mapped[int | None] = mapped_column(Integer, nullable=True)
     parse_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_: Mapped[dict] = mapped_column(
         "metadata", JSONB, nullable=False, default=dict
@@ -42,12 +41,6 @@ class RcmsManual(Base, TimestampMixin):
 
     chunks: Mapped[list[RcmsChunk]] = relationship(
         "RcmsChunk", back_populates="manual", cascade="all, delete-orphan"
-    )
-    pages: Mapped[list[RcmsPage]] = relationship(
-        "RcmsPage", back_populates="manual", cascade="all, delete-orphan"
-    )
-    sections: Mapped[list[RcmsSection]] = relationship(
-        "RcmsSection", back_populates="manual", cascade="all, delete-orphan"
     )
 
 
@@ -77,60 +70,6 @@ class RcmsChunk(Base):
     manual: Mapped[RcmsManual] = relationship("RcmsManual", back_populates="chunks")
 
 
-class RcmsPage(Base):
-    """Full-page retrieval unit — one row per PDF/DOCX page."""
-    __tablename__ = "rcms_pages"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    manual_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("rcms_manuals.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    full_text: Mapped[str] = mapped_column(Text, nullable=False)
-    section_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-
-    if _vector_available:
-        embedding: Mapped[list[float] | None] = mapped_column(
-            Vector(384), nullable=True
-        )
-    else:
-        embedding: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-
-    manual: Mapped[RcmsManual] = relationship("RcmsManual", back_populates="pages")
-
-
-class RcmsSection(Base):
-    """Section-level retrieval unit — a logical heading block within a page."""
-    __tablename__ = "rcms_sections"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    manual_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("rcms_manuals.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    section_title: Mapped[str] = mapped_column(String(500), nullable=False)
-    section_text: Mapped[str] = mapped_column(Text, nullable=False)
-    section_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-
-    if _vector_available:
-        embedding: Mapped[list[float] | None] = mapped_column(
-            Vector(384), nullable=True
-        )
-    else:
-        embedding: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-
-    manual: Mapped[RcmsManual] = relationship("RcmsManual", back_populates="sections")
-
-
 class RcmsQaSession(Base, TimestampMixin):
     __tablename__ = "rcms_qa_sessions"
 
@@ -158,3 +97,9 @@ class RcmsQaSession(Base, TimestampMixin):
     model_version: Mapped[str] = mapped_column(String(100), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(50), nullable=False)
     token_usage: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    question_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    normalized_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expanded_queries: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    routing_decision: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    rule_cards: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    answerability_status: Mapped[str | None] = mapped_column(String(100), nullable=True)

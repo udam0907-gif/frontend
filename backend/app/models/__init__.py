@@ -4,6 +4,7 @@ from app.models.expense import ExpenseDocument, ExpenseItem
 from app.models.document import GeneratedDocument, ValidationResult
 from app.models.rcms import RcmsChunk, RcmsManual, RcmsQaSession
 from app.models.audit import AuditLog
+from app.models import legal  # noqa: F401
 
 __all__ = [
     "Project",
@@ -17,4 +18,5 @@ __all__ = [
     "RcmsChunk",
     "RcmsQaSession",
     "AuditLog",
+    "legal",
 ]

@@ -152,9 +152,13 @@ export const rcmsApi = {
       .then((r) => r.data);
   },
 
-  ask: (question: string, manualIds?: string[]) =>
+  ask: (question: string, manualIds?: string[], debug?: boolean) =>
     apiClient
-      .post<RcmsQaResponse>("/rcms/qa", { question, manual_ids: manualIds })
+      .post<RcmsQaResponse>("/rcms/qa", {
+        question,
+        manual_ids: manualIds,
+        debug: debug ?? false,
+      })
       .then((r) => r.data),
 
   listSessions: () =>

@@ -11,9 +11,6 @@ system: |
 
   응답 형식은 항상 유효한 JSON이어야 합니다.
 
-version: "1.1.0"
+version: "1.0.0"
 max_chunks: 5
-# Korean multilingual embeddings (paraphrase-multilingual-MiniLM-L12-v2) score
-# lower than English-only models. 0.50 is safer for Korean manual retrieval.
-# Previous value 0.75 was too strict — it rejected correct chunks.
-min_confidence: 0.50
+min_confidence: 0.75

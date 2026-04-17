@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import re
 from pathlib import Path
 from typing import Any
 
@@ -9,25 +8,6 @@ from app.core.exceptions import ParseError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
-
-# ─── Korean section heading detection ────────────────────────────────────────
-# Matches lines that look like section headings in RCMS / government manuals
-_HEADING_RE = re.compile(
-    r"""(?mx)                          # multiline, verbose
-    ^[ \t]*                            # optional leading whitespace
-    (?:
-        \d{1,2}(?:\.\d{1,2}){0,3}\.?[ \t]+  # 1. / 1.1 / 1.1.1.
-      | 제\s*\d+\s*[조절항목]           # 제1조 제2절 제3항 제4목
-      | [가나다라마바사아자차카타파하]\.[ \t]+  # 가. 나.
-      | [①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]      # circled numbers
-      | [■□●○◆◇▶▷◉]\s+               # bullet symbols with space
-      | [【\[]\s*\d+\s*[】\]]          # 【1】 [1]
-    )
-    [\w가-힣(（]                        # heading must continue with word char
-    """,
-)
-_MIN_HEADING_LEN = 3
-_MAX_HEADING_LEN = 80
 
 
 class ParsedPage:
@@ -201,77 +181,6 @@ class ParserService:
         if len(first_line) <= 100:
             return first_line
         return None
-
-    def extract_sections(
-        self,
-        pages: list[ParsedPage],
-        min_section_chars: int = 100,
-    ) -> list[dict[str, Any]]:
-        """
-        Detect logical sections within pages using Korean heading patterns.
-
-        Returns a list of dicts:
-            page_number, section_title, section_text, section_index
-
-        A section spans from one heading to the next (or to the page boundary).
-        Pages that contain no detectable headings are returned as one section
-        with section_title = page.section_title (from first-line heuristic).
-        """
-        sections: list[dict[str, Any]] = []
-        section_idx = 0
-
-        for page in pages:
-            text = page.text
-            if not text.strip():
-                continue
-
-            lines = text.split("\n")
-            heading_positions: list[int] = []  # line indices of headings
-
-            for i, line in enumerate(lines):
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                if (
-                    _HEADING_RE.match(line)
-                    and _MIN_HEADING_LEN <= len(stripped) <= _MAX_HEADING_LEN
-                ):
-                    heading_positions.append(i)
-
-            if not heading_positions:
-                # No headings found — treat entire page as one section
-                sections.append({
-                    "page_number": page.page_number,
-                    "section_title": page.section_title or f"p.{page.page_number}",
-                    "section_text": text.strip(),
-                    "section_index": section_idx,
-                })
-                section_idx += 1
-                continue
-
-            # Build sections between heading positions
-            boundaries = heading_positions + [len(lines)]
-            for k, start in enumerate(heading_positions):
-                end = boundaries[k + 1]
-                heading_line = lines[start].strip()
-                body_lines = lines[start + 1: end]
-                body = "\n".join(body_lines).strip()
-                section_text = (heading_line + "\n" + body).strip()
-
-                if len(section_text) < min_section_chars:
-                    # Too short — merge with heading only
-                    section_text = section_text or heading_line
-
-                sections.append({
-                    "page_number": page.page_number,
-                    "section_title": heading_line[:_MAX_HEADING_LEN],
-                    "section_text": section_text,
-                    "section_index": section_idx,
-                })
-                section_idx += 1
-
-        logger.info("sections_extracted", total_sections=len(sections))
-        return sections
 
     def chunk_text(
         self,

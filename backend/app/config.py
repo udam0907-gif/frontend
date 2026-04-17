@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.1
     prompt_cache_enabled: bool = True
 
+    # Korea Law Open API
+    law_api_oc: str = ""  # Korea Law API OC (email registered at law.go.kr)
+
     # Embedding
     embedding_provider: Literal["openai", "local"] = "local"
     openai_api_key: str = ""
@@ -55,17 +58,13 @@ class Settings(BaseSettings):
     storage_documents_path: str = "./storage/documents"
     storage_manuals_path: str = "./storage/manuals"
     storage_exports_path: str = "./storage/exports"
+    storage_laws_path: str = "./storage/laws"
 
     # RAG
     rag_chunk_size: int = 800
     rag_chunk_overlap: int = 100
     rag_max_chunks: int = 5
     rag_min_confidence: float = 0.75
-
-    # Korea Law Open API (https://www.law.go.kr/LSW/openApi.do)
-    # OC = registered email — register at law.go.kr to get free API access
-    law_api_oc: str = ""
-    law_api_base_url: str = "https://www.law.go.kr/DRF"
 
     # Logging
     log_level: str = "INFO"
@@ -78,6 +77,7 @@ class Settings(BaseSettings):
             "storage_documents_path",
             "storage_manuals_path",
             "storage_exports_path",
+            "storage_laws_path",
         ]:
             os.makedirs(getattr(self, path_attr), exist_ok=True)
 

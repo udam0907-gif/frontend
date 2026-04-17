@@ -66,3 +66,21 @@ class QuestionType(str, Enum):
     rcms_procedure = "rcms_procedure"
     legal_policy = "legal_policy"
     mixed = "mixed"
+    definition = "definition"
+
+
+class ConclusionType(str, Enum):
+    allowed = "allowed"
+    not_allowed = "not_allowed"
+    conditional = "conditional"
+    approval_required = "approval_required"
+    unclear = "unclear"
+
+
+class AnswerStatusType(str, Enum):
+    answered_with_direct_evidence = "answered_with_direct_evidence"
+    answered_with_mixed_sources = "answered_with_mixed_sources"
+    related_context_only = "related_context_only"
+    insufficient_evidence = "insufficient_evidence"
+    not_found_in_uploaded_materials = "not_found_in_uploaded_materials"
+    routing_error = "routing_error"

@@ -19,15 +19,20 @@ from app.schemas.rcms import (
     RcmsQaResponse,
     RcmsQaSessionRead,
 )
+from app.services.legal_rag_service import LegalRagService
 from app.services.llm_service import get_llm_service
+from app.services.qa_orchestrator import QaOrchestrator
 from app.services.rag_service import RagService
 
 router = APIRouter(tags=["rcms"])
 logger = get_logger(__name__)
 
 
-def get_rag_service() -> RagService:
-    return RagService(get_llm_service())
+def get_orchestrator() -> QaOrchestrator:
+    llm = get_llm_service()
+    rag = RagService(llm)
+    legal_rag = LegalRagService(rag)
+    return QaOrchestrator(llm, rag, legal_rag)
 
 
 @router.get("/manuals", response_model=list[RcmsManualRead])
@@ -84,7 +89,6 @@ async def upload_manual(
     await db.flush()
     await db.refresh(manual)
 
-    # Trigger async parsing in background
     manual_id = manual.id
     background_tasks.add_task(_parse_manual_background, manual_id, file_path, original_filename)
 
@@ -130,31 +134,50 @@ async def delete_manual(
 async def ask_question(
     payload: RcmsQaRequest,
     db: AsyncSession = Depends(get_db),
-    rag_service: RagService = Depends(get_rag_service),
+    orchestrator: QaOrchestrator = Depends(get_orchestrator),
 ) -> dict:
-    result = await rag_service.answer(
+    result = await orchestrator.answer(
         db=db,
         question=payload.question,
         manual_ids=payload.manual_ids,
+        debug_mode=payload.debug,
     )
 
-    answer_status = result.get("answer_status", "not_found_in_uploaded_manuals")
+    qu = result.get("question_understanding", {})
+    answerability_status = result.get("answer_status", "not_found_in_uploaded_materials")
 
-    # Persist Q&A session for audit log
     session = RcmsQaSession(
         id=uuid.uuid4(),
         question=payload.question,
         answer={
-            "short_answer": result["short_answer"],
-            "detailed_explanation": result["detailed_explanation"],
-            "evidence": result["evidence"],
-            "found_in_manual": result["found_in_manual"],
-            "answer_status": answer_status,
+            "question_type": result.get("question_type"),
+            "short_answer": result.get("short_answer", ""),
+            "conclusion": result.get("conclusion"),
+            "conditions_or_exceptions": result.get("conditions_or_exceptions"),
+            "legal_basis": result.get("legal_basis"),
+            "rcms_steps": result.get("rcms_steps"),
+            "detailed_explanation": result.get("detailed_explanation", ""),
+            "further_confirmation_needed": result.get("further_confirmation_needed", False),
+            "confidence": result.get("confidence", "low"),
+            "evidence": [
+                e if isinstance(e, dict) else e.model_dump()
+                for e in result.get("evidence", [])
+            ],
+            "found_in_manual": result.get("found_in_manual", False),
+            "answer_status": answerability_status,
         },
         retrieved_chunks=result.get("retrieved_chunks", []),
-        model_version=result["model_version"],
-        prompt_version=result["prompt_version"],
-        token_usage=result.get("token_usage", {}),
+        model_version=result.get("model_version", ""),
+        prompt_version=result.get("prompt_version", ""),
+        token_usage={},
+        question_type=result.get("question_type"),
+        normalized_query=qu.get("normalized_query"),
+        expanded_queries=qu.get("expanded_queries"),
+        routing_decision=qu.get("routing_decision"),
+        rule_cards=(
+            result.get("debug", {}).get("rule_cards") if result.get("debug") else None
+        ),
+        answerability_status=answerability_status,
     )
     db.add(session)
     await db.flush()
@@ -162,9 +185,9 @@ async def ask_question(
     logger.info(
         "rcms_qa_answered",
         question_preview=payload.question[:80],
-        answer_status=answer_status,
+        question_type=result.get("question_type"),
+        answer_status=answerability_status,
         evidence_count=len(result.get("evidence", [])),
-        manual_ids=[str(mid) for mid in (payload.manual_ids or [])],
     )
 
     return result
@@ -201,8 +224,9 @@ async def _parse_manual_background(
             manual.parse_status = ParseStatus.processing
             await db.flush()
 
-            rag = RagService(get_llm_service())
-            chunk_count, page_count, section_count = await rag.ingest_manual(
+            llm = get_llm_service()
+            rag = RagService(llm)
+            chunk_count = await rag.ingest_manual(
                 db=db,
                 manual_id=manual_id,
                 file_path=file_path,
@@ -211,15 +235,17 @@ async def _parse_manual_background(
 
             manual.parse_status = ParseStatus.completed
             manual.total_chunks = chunk_count
-            manual.total_sections = section_count
             await db.commit()
             logger.info("manual_parse_completed", manual_id=str(manual_id), chunks=chunk_count)
 
         except Exception as e:
             logger.error("manual_parse_failed", manual_id=str(manual_id), error=str(e))
             try:
-                manual.parse_status = ParseStatus.failed
-                manual.parse_error = str(e)
-                await db.commit()
+                result = await db.execute(select(RcmsManual).where(RcmsManual.id == manual_id))
+                manual = result.scalar_one_or_none()
+                if manual:
+                    manual.parse_status = ParseStatus.failed
+                    manual.parse_error = str(e)[:500]
+                    await db.commit()
             except Exception:
                 pass

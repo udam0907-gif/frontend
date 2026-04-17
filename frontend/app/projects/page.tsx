@@ -89,9 +89,9 @@ export default function ProjectsPage() {
                       <p className="text-xs text-gray-400 mt-0.5">총 예산</p>
                     </div>
                   </div>
-                  {project.budget_categories.length > 0 && (
+                  {(project.budget_categories ?? []).length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {project.budget_categories.map((cat) => (
+                      {(project.budget_categories ?? []).map((cat) => (
                         <span
                           key={cat.id}
                           className="text-xs px-2 py-0.5 bg-blue-50 text-blue-600 rounded"

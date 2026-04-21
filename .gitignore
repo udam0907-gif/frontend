@@ -1,0 +1,60 @@
+# ─── 절대 올리면 안 되는 것 (API 키, 비밀번호) ────────────────────────────
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# ─── Backend ──────────────────────────────────────────────────────────────
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/.pytest_cache/
+backend/storage/templates/*
+backend/storage/documents/*
+backend/storage/manuals/*
+backend/storage/exports/*
+!backend/storage/**/.gitkeep
+backend/.mypy_cache/
+backend/.ruff_cache/
+
+# ─── Frontend ─────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/node_modules.zip
+frontend/.next/
+frontend/out/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# ─── 이 프로젝트와 무관한 폴더 ────────────────────────────────────────────
+ai_program_developer-master/
+business-plan-generator/
+budget-execution-manager/
+kidcafe-ai-developer/
+figma-plugin-lifeasy/
+repo_clone/
+repo_frontend_github/
+design_images/
+.claude/
+
+# ─── 기타 파일 ────────────────────────────────────────────────────────────
+*.pdf
+*.docx
+*.md
+!README.md
+!CLAUDE.md
+!backend/README.md
+!frontend/README.md
+!skills/*.md
+carousel_lifeasy.html
+carousel-output.json
+fill_docx.py
+generate_images.py
+insert_images.py
+
+# ─── OS / 에디터 ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/

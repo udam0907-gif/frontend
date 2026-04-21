@@ -1,0 +1,349 @@
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+export type ProjectStatus = "active" | "closed" | "suspended";
+
+export type CategoryType =
+  | "outsourcing"
+  | "labor"
+  | "test_report"
+  | "materials"
+  | "meeting"
+  | "other";
+
+export type ExpenseStatus =
+  | "draft"
+  | "pending_validation"
+  | "validated"
+  | "rejected"
+  | "exported";
+
+export type ParseStatus = "pending" | "processing" | "completed" | "failed";
+
+// ─── Project ─────────────────────────────────────────────────────────────────
+
+export interface BudgetCategory {
+  id: string;
+  category_type: CategoryType;
+  allocated_amount: number;
+  spent_amount: number;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  code: string;
+  institution: string;
+  principal_investigator: string;
+  period_start: string;
+  period_end: string;
+  total_budget: number;
+  status: ProjectStatus;
+  agreement_file_path: string | null;
+  plan_file_path: string | null;
+  budget_categories: BudgetCategory[];
+  created_at: string;
+}
+
+export interface ProjectCreate {
+  name: string;
+  code: string;
+  institution: string;
+  principal_investigator: string;
+  period_start: string;
+  period_end: string;
+  total_budget: number;
+  budget_categories?: { category_type: CategoryType; allocated_amount: number }[];
+}
+
+// ─── Template ────────────────────────────────────────────────────────────────
+
+export interface Template {
+  id: string;
+  category_type: CategoryType;
+  document_type: string;
+  name: string;
+  display_name: string; // 호환성 유지 — 백엔드 name 필드 별칭
+  filename: string;
+  version: number;
+  field_map: Record<string, unknown>;
+  is_active: boolean;
+  project_id: string | null;
+  created_at: string;
+}
+
+// ─── Expense ─────────────────────────────────────────────────────────────────
+
+export interface ExpenseDocument {
+  id: string;
+  document_type: string;
+  original_filename: string;
+  upload_status: string;
+}
+
+export interface ExpenseItem {
+  id: string;
+  project_id: string;
+  category_type: CategoryType;
+  title: string;
+  description: string | null;
+  amount: number;
+  vendor_name: string | null;
+  expense_date: string | null;
+  status: ExpenseStatus;
+  input_data: Record<string, unknown>;
+  documents: ExpenseDocument[];
+  created_at: string;
+}
+
+export interface ExpenseCreate {
+  project_id: string;
+  category_type: CategoryType;
+  title: string;
+  description?: string;
+  amount: number;
+  vendor_name?: string;
+  expense_date?: string;
+  metadata?: Record<string, unknown>;
+}
+
+// ─── Validation ──────────────────────────────────────────────────────────────
+
+export interface ValidationCheck {
+  code: string;
+  message: string;
+  field?: string;
+}
+
+export interface ValidationResult {
+  id: string;
+  expense_item_id: string;
+  is_valid: boolean;
+  blocking_errors: ValidationCheck[];
+  warnings: ValidationCheck[];
+  passed_checks: ValidationCheck[];
+  validated_at: string;
+}
+
+// ─── RCMS ────────────────────────────────────────────────────────────────────
+
+export interface RcmsManual {
+  id: string;
+  filename: string;
+  original_filename: string;
+  display_name: string;
+  version: string;
+  parse_status: ParseStatus;
+  total_chunks: number | null;
+  created_at: string;
+}
+
+export type QuestionType = "rcms_procedure" | "legal_policy" | "mixed" | "definition";
+
+export type AnswerStatus =
+  | "answered_with_evidence"
+  | "not_found_in_uploaded_manuals";
+
+export type AnswerStatusType =
+  | "answered_with_direct_evidence"
+  | "answered_with_mixed_sources"
+  | "related_context_only"
+  | "insufficient_evidence"
+  | "not_found_in_uploaded_materials"
+  | "routing_error";
+
+/** Evidence from either a legal document or an RCMS manual. */
+export interface EvidenceChunk {
+  source_type: "legal" | "rcms";
+  evidence_tier?: 1 | 2 | 3;
+  source_label?: string; // "법령 원문 근거" | "공식 FAQ/운영안내 근거" | "일반 참고 문맥"
+
+  // RCMS manual fields
+  manual_id?: string;
+  display_name?: string;
+
+  // Legal document fields
+  law_name?: string;
+  article_number?: string;
+  article_title?: string;
+
+  // Common
+  page?: number | null;
+  section_title?: string | null;
+  excerpt: string;
+  confidence: number;
+  chunk_id?: string;
+  is_decisive?: boolean;
+}
+
+export interface DebugInfo {
+  question_type: string;
+  normalized_query: string;
+  expanded_queries: string[];
+  routing_decision: string;
+  rcms_candidates: Array<{
+    chunk_id: string;
+    display_name: string;
+    page: number | null;
+    section: string;
+    similarity: number;
+    excerpt: string;
+  }>;
+  legal_candidates: Array<{
+    chunk_id: string;
+    law_name: string;
+    article: string;
+    similarity: number;
+    excerpt: string;
+  }>;
+  rule_cards: unknown[];
+  answerability: {
+    status: string;
+    has_direct_evidence: boolean;
+    explanation: string;
+  };
+}
+
+export interface RcmsQaResponse {
+  question_type: QuestionType;
+  short_answer: string;
+  conclusion: string | null;
+  conditions_or_exceptions: string | null;
+  legal_basis: string | null;
+  rcms_steps: string | null;
+  detailed_explanation: string;
+  further_confirmation_needed: boolean;
+  confidence: "high" | "medium" | "low";
+  evidence: EvidenceChunk[];
+  found_in_manual: boolean;
+  answer_status: string;
+  answer_status_type: AnswerStatusType;
+  question_understanding?: {
+    question_type: QuestionType;
+    normalized_query: string;
+    expanded_queries: string[];
+    routing_decision: string;
+  };
+  debug?: DebugInfo | null;
+  model_version: string;
+  prompt_version: string;
+}
+
+export interface RcmsQaSession {
+  id: string;
+  question: string;
+  answer: {
+    question_type?: QuestionType;
+    short_answer: string;
+    conclusion?: string | null;
+    conditions_or_exceptions?: string | null;
+    legal_basis?: string | null;
+    rcms_steps?: string | null;
+    detailed_explanation: string;
+    evidence: EvidenceChunk[];
+    found_in_manual: boolean;
+    answer_status: string;
+  };
+  model_version: string;
+  prompt_version: string;
+  created_at: string;
+}
+
+// ─── Legal documents ──────────────────────────────────────────────────────────
+
+export interface LegalDoc {
+  id: string;
+  law_name: string;
+  law_mst: string;
+  source_type: string;   // "api" | "upload"
+  promulgation_date: string | null;
+  effective_date: string | null;
+  total_articles: number | null;
+  total_chunks: number | null;
+  sync_status: ParseStatus;
+  sync_error: string | null;
+  created_at: string;
+}
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+
+export interface DashboardStats {
+  total_projects: number;
+  active_projects: number;
+  total_expenses: number;
+  pending_validation: number;
+  validated: number;
+  rejected: number;
+}
+
+// ─── Vendor ──────────────────────────────────────────────────────────────────
+
+export type VendorCategory = "매입처" | "매출처";
+
+export interface Vendor {
+  id: string;
+  project_id: string;
+  name: string;
+  vendor_category: VendorCategory;
+  business_number: string;
+  contact: string | null;
+  business_registration_path: string | null;
+  bank_copy_path: string | null;
+  quote_template_path: string | null;
+  transaction_statement_path: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VendorCreate {
+  project_id: string;
+  name: string;
+  vendor_category: VendorCategory;
+  business_number: string;
+  contact?: string;
+}
+
+// ─── Document Set ─────────────────────────────────────────────────────────────
+
+export type DocSetItemStatus =
+  | "generated"              // DOCX/XLSX 렌더링 완료
+  | "vendor_copy"            // 업체 파일 복사 (사업자등록증/통장사본/PDF 등)
+  | "vendor_template_used"   // 업체 원본 양식 사용하여 렌더링 완료
+  | "excel_mapping_needed"   // XLSX 원본 복사됨, placeholder 없음
+  | "passthrough_copy"       // PDF/이미지 원본 포함, 값 삽입 불가
+  | "template_missing"       // 어느 소스에서도 파일 없음
+  | "vendor_file_missing"    // 업체/비교견적업체 파일 슬롯 비어 있음
+  | "error";                 // 렌더링 예외
+
+export interface DocSetItem {
+  document_type: string;
+  status: DocSetItemStatus;
+  output_path: string | null;
+  generated_document_id: string | null;
+  error_message: string | null;
+  is_vendor_doc: boolean;
+}
+
+export interface DocumentSetResponse {
+  expense_item_id: string;
+  category_type: string;
+  total: number;
+  generated: number;
+  errors: number;
+  all_generated: boolean;
+  items: DocSetItem[];
+}
+
+// ─── API ─────────────────────────────────────────────────────────────────────
+
+export interface ApiError {
+  error: string;
+  message: string;
+  details?: unknown;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  size: number;
+}

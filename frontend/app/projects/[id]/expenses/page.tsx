@@ -57,6 +57,12 @@ interface BaseForm {
   amount: string;
   budgetItem: string;
   note: string;
+  usagePurpose: string;
+  purchasePurpose: string;
+  deliveryDate: string;
+  spec: string;
+  quantity: string;
+  unitPrice: string;
 }
 
 interface MeetingFields {
@@ -67,8 +73,6 @@ interface MeetingFields {
 
 interface MaterialsFields {
   productName: string;
-  quantity: string;
-  unitPrice: string;
 }
 
 interface OutsourcingFields {
@@ -100,10 +104,16 @@ const initialBase: BaseForm = {
   amount: "",
   budgetItem: "",
   note: "",
+  usagePurpose: "",
+  purchasePurpose: "",
+  deliveryDate: "",
+  spec: "",
+  quantity: "",
+  unitPrice: "",
 };
 
 const initialMeeting: MeetingFields = { attendeeCount: "", purpose: "", receiptFile: null };
-const initialMaterials: MaterialsFields = { productName: "", quantity: "", unitPrice: "" };
+const initialMaterials: MaterialsFields = { productName: "" };
 const initialOutsourcing: OutsourcingFields = { productName: "", workContent: "", specification: "" };
 const initialTestReport: TestReportFields = { testInstitution: "", testItems: "", reportFile: null };
 const initialLabor: LaborFields = { researcherName: "", paymentType: "cash", participationMonths: "", participationRate: "" };
@@ -153,8 +163,8 @@ export default function ProjectExpensesPage() {
 
   // 재료비: 수량 × 단가 자동계산
   const materialsAutoAmount =
-    base.categoryType === "materials" && materials.quantity && materials.unitPrice
-      ? Number(materials.quantity) * Number(materials.unitPrice)
+    base.categoryType === "materials" && base.quantity && base.unitPrice
+      ? Number(base.quantity) * Number(base.unitPrice)
       : null;
 
   // 비교견적 금액 = 원금액 × 1.1
@@ -171,17 +181,44 @@ export default function ProjectExpensesPage() {
 
   const buildInputData = (): Record<string, unknown> => {
     const base_: Record<string, unknown> = {};
+    const quantity = Number(base.quantity) || 0;
+    const unitPrice = Number(base.unitPrice) || 0;
+    const lineAmount = quantity > 0 ? quantity * unitPrice : 0;
+    const itemName =
+      base.categoryType === "materials"
+        ? materials.productName || base.budgetItem
+        : base.categoryType === "outsourcing"
+        ? outsourcing.productName || base.budgetItem
+        : base.budgetItem;
     if (base.vendorId) base_["vendor_id"] = base.vendorId;
     if (base.compareVendorId) {
       base_["compare_vendor_id"] = base.compareVendorId;
       if (compareAmount) base_["compare_amount"] = compareAmount;
+    }
+    if (base.usagePurpose) base_["usage_purpose"] = base.usagePurpose;
+    if (base.purchasePurpose) base_["purchase_purpose"] = base.purchasePurpose;
+    if (base.deliveryDate) base_["delivery_date"] = base.deliveryDate;
+    if (base.spec) base_["spec"] = base.spec;
+    if (quantity > 0) base_["quantity"] = quantity;
+    if (unitPrice > 0) base_["unit_price"] = unitPrice;
+    if (lineAmount > 0) base_["amount"] = lineAmount;
+    if (itemName || base.spec || quantity > 0 || unitPrice > 0) {
+      base_["line_items"] = [
+        {
+          item_name: itemName || undefined,
+          spec: base.spec || undefined,
+          quantity: quantity || undefined,
+          unit_price: unitPrice || undefined,
+          amount: lineAmount || undefined,
+        },
+      ];
     }
 
     switch (base.categoryType) {
       case "meeting":
         return { ...base_, attendee_count: Number(meeting.attendeeCount) || 0, purpose: meeting.purpose };
       case "materials":
-        return { ...base_, product_name: materials.productName, quantity: Number(materials.quantity) || 0, unit_price: Number(materials.unitPrice) || 0 };
+        return { ...base_, product_name: materials.productName };
       case "outsourcing":
         return { ...base_, product_name: outsourcing.productName, work_content: outsourcing.workContent, specification: outsourcing.specification };
       case "test_report":
@@ -512,6 +549,67 @@ export default function ProjectExpensesPage() {
                   onChange={(e) => setBase((f) => ({ ...f, note: e.target.value }))}
                 />
               </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="usagePurpose">사용 목적</Label>
+                <Textarea
+                  id="usagePurpose"
+                  rows={2}
+                  value={base.usagePurpose}
+                  onChange={(e) => setBase((f) => ({ ...f, usagePurpose: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="purchasePurpose">구매 목적</Label>
+                <Textarea
+                  id="purchasePurpose"
+                  rows={2}
+                  value={base.purchasePurpose}
+                  onChange={(e) => setBase((f) => ({ ...f, purchasePurpose: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="deliveryDate">납품일</Label>
+                <Input
+                  id="deliveryDate"
+                  type="date"
+                  value={base.deliveryDate}
+                  onChange={(e) => setBase((f) => ({ ...f, deliveryDate: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="spec">규격</Label>
+                <Input
+                  id="spec"
+                  value={base.spec}
+                  onChange={(e) => setBase((f) => ({ ...f, spec: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="quantity">수량</Label>
+                <Input
+                  id="quantity"
+                  type="number"
+                  min={0}
+                  value={base.quantity}
+                  onChange={(e) => setBase((f) => ({ ...f, quantity: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="unitPrice">단가</Label>
+                <Input
+                  id="unitPrice"
+                  type="number"
+                  min={0}
+                  value={base.unitPrice}
+                  onChange={(e) => setBase((f) => ({ ...f, unitPrice: e.target.value }))}
+                />
+              </div>
             </div>
           </div>
 
@@ -568,8 +666,8 @@ export default function ProjectExpensesPage() {
                   <Input
                     type="number"
                     placeholder="0"
-                    value={materials.quantity}
-                    onChange={(e) => setMaterials((f) => ({ ...f, quantity: e.target.value }))}
+                    value={base.quantity}
+                    onChange={(e) => setBase((f) => ({ ...f, quantity: e.target.value }))}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -577,8 +675,8 @@ export default function ProjectExpensesPage() {
                   <Input
                     type="number"
                     placeholder="0"
-                    value={materials.unitPrice}
-                    onChange={(e) => setMaterials((f) => ({ ...f, unitPrice: e.target.value }))}
+                    value={base.unitPrice}
+                    onChange={(e) => setBase((f) => ({ ...f, unitPrice: e.target.value }))}
                   />
                 </div>
                 <div className="space-y-1.5">

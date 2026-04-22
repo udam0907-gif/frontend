@@ -49,6 +49,7 @@ async def init_db() -> None:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         from app.models import (  # noqa: F401
+            company_setting,
             document,
             expense,
             project,

@@ -18,20 +18,21 @@ import {
 import { cn } from "@/lib/utils";
 
 const globalNavItems = [
-  { href: "/", label: "전체 과제 대시보드", icon: LayoutDashboard, exact: true },
-  { href: "/projects", label: "과제 목록", icon: FolderOpen, exact: true },
-  { href: "/expenses", label: "전체 집행현황", icon: ReceiptText, exact: false },
-  { href: "/export", label: "전체 출력문서", icon: Download, exact: false },
+  { href: "/", label: "?꾩껜 怨쇱젣 ??쒕낫??, icon: LayoutDashboard, exact: true },
+  { href: "/projects", label: "怨쇱젣 紐⑸줉", icon: FolderOpen, exact: true },
+  { href: "/expenses", label: "?꾩껜 吏묓뻾?꾪솴", icon: ReceiptText, exact: false },
+  { href: "/company-settings", label: "회사 설정", icon: Settings, exact: false },
+  { href: "/export", label: "?꾩껜 異쒕젰臾몄꽌", icon: Download, exact: false },
 ];
 
 const projectNavDefs = [
-  { suffix: "", label: "과제 전용 대시보드", icon: LayoutDashboard, exact: true },
-  { suffix: "/templates", label: "템플릿 관리", icon: FileText, exact: false },
-  { suffix: "/vendors", label: "업체 관리", icon: Building2, exact: false },
-  { suffix: "/expenses", label: "비용집행", icon: ReceiptText, exact: false },
-  { suffix: "/details", label: "집행상세", icon: ClipboardList, exact: false },
-  { suffix: "/docs", label: "문서 출력", icon: Printer, exact: false },
-  { suffix: "/settings", label: "과제 설정", icon: Settings, exact: false },
+  { suffix: "", label: "怨쇱젣 ?꾩슜 ??쒕낫??, icon: LayoutDashboard, exact: true },
+  { suffix: "/templates", label: "?쒗뵆由?愿由?, icon: FileText, exact: false },
+  { suffix: "/vendors", label: "?낆껜 愿由?, icon: Building2, exact: false },
+  { suffix: "/expenses", label: "鍮꾩슜吏묓뻾", icon: ReceiptText, exact: false },
+  { suffix: "/details", label: "吏묓뻾?곸꽭", icon: ClipboardList, exact: false },
+  { suffix: "/docs", label: "臾몄꽌 異쒕젰", icon: Printer, exact: false },
+  { suffix: "/settings", label: "怨쇱젣 ?ㅼ젙", icon: Settings, exact: false },
 ];
 
 export function Sidebar() {
@@ -59,14 +60,14 @@ export function Sidebar() {
     <aside className="w-60 bg-white border-r border-gray-200 flex flex-col shrink-0">
       <div className="px-5 py-4 border-b border-gray-100">
         <h1 className="text-sm font-bold text-gray-900 leading-tight">
-          정부지원사업<br />운영 시스템
+          ?뺣?吏?먯궗??br />?댁쁺 ?쒖뒪??
         </h1>
       </div>
 
       <nav className="flex-1 py-2 overflow-y-auto">
-        {/* 전체 관리 */}
+        {/* ?꾩껜 愿由?*/}
         <p className="px-5 pt-4 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wide">
-          전체 관리
+          ?꾩껜 愿由?
         </p>
         {globalNavItems.map(({ href, label, icon: Icon, exact }) => {
           const active = isActive(href, exact);
@@ -87,9 +88,9 @@ export function Sidebar() {
           );
         })}
 
-        {/* 선택 과제 */}
+        {/* ?좏깮 怨쇱젣 */}
         <p className="px-5 pt-5 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wide">
-          선택 과제
+          ?좏깮 怨쇱젣
         </p>
 
         {projectNavItems ? (
@@ -116,7 +117,7 @@ export function Sidebar() {
             <div className="flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-gray-300 mt-0.5 shrink-0" />
               <p className="text-xs text-gray-400 leading-relaxed">
-                과제를 먼저 선택하세요
+                怨쇱젣瑜?癒쇱? ?좏깮?섏꽭??
               </p>
             </div>
             {projectNavDefs.map((def) => (
@@ -145,7 +146,7 @@ export function Sidebar() {
           )}
         >
           <BookOpen className="w-4 h-4 shrink-0" />
-          RCMS 질의응답
+          RCMS 吏덉쓽?묐떟
         </Link>
       </nav>
 

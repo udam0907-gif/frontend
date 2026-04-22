@@ -16,6 +16,9 @@ import type {
   VendorCreate,
   DocumentSetResponse,
   FieldRegistryItem,
+  CompanySettings,
+  CompanySettingsUpdate,
+  CompanySettingsUploadType,
 } from "./types";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -295,3 +298,25 @@ export const documentSetsApi = {
 
 // ─── Projects stats (aggregated on frontend from list) ───────────────────────
 // Dashboard uses projectsApi.list() + expensesApi.list() directly
+
+export const companySettingsApi = {
+  get: (companyId = "default") =>
+    apiClient
+      .get<CompanySettings>("/company-settings", { params: { company_id: companyId } })
+      .then((r) => r.data),
+
+  update: (data: CompanySettingsUpdate) =>
+    apiClient.put<CompanySettings>("/company-settings", data).then((r) => r.data),
+
+  uploadFile: (companyId: string, fileType: CompanySettingsUploadType, file: File) => {
+    const form = new FormData();
+    form.append("company_id", companyId);
+    form.append("file_type", fileType);
+    form.append("file", file);
+    return apiClient
+      .post<CompanySettings>("/company-settings/files", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
+      .then((r) => r.data);
+  },
+};

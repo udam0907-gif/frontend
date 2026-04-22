@@ -35,6 +35,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import DocumentGenerationError
 from app.core.logging import get_logger
+from app.models.company_setting import CompanySetting
 from app.models.document import GeneratedDocument
 from app.models.enums import CategoryType, DocumentType
 from app.models.expense import ExpenseItem
@@ -183,6 +184,7 @@ class DocumentSetService:
     ) -> DocumentSetResult:
         expense = await self._load_expense(expense_id, db)
         project = await self._load_project(expense.project_id, db)
+        company_setting = await self._load_company_setting(db)
 
         meta = expense.metadata_ or {}
 
@@ -211,7 +213,7 @@ class DocumentSetService:
         )
 
         required_docs = DOCUMENT_SETS.get(expense.category_type, [])
-        base_context = self._build_context(expense, project)
+        base_context = self._build_context(expense, project, company_setting)
 
         result = DocumentSetResult(
             expense_item_id=expense_id,
@@ -567,7 +569,12 @@ class DocumentSetService:
 
     # ─── 헬퍼: 컨텍스트 빌드 ─────────────────────────────────────────────────
 
-    def _build_context(self, expense: ExpenseItem, project: Project) -> dict[str, Any]:
+    def _build_context(
+        self,
+        expense: ExpenseItem,
+        project: Project,
+        company_setting: CompanySetting | None = None,
+    ) -> dict[str, Any]:
         meta = expense.metadata_ or {}
         ctx: dict[str, Any] = {
             "expense_date":       expense.expense_date or "",
@@ -586,6 +593,28 @@ class DocumentSetService:
             if value is not None and key not in ("vendor_id", "compare_vendor_id", "compare_amount"):
                 ctx[key] = value
 
+        line_items = ctx.get("line_items")
+        if isinstance(line_items, list):
+            normalized_items: list[dict[str, Any]] = []
+            for raw_item in line_items:
+                if not isinstance(raw_item, dict):
+                    continue
+                item = dict(raw_item)
+                quantity = item.get("quantity")
+                unit_price = item.get("unit_price")
+                if item.get("amount") in (None, "") and quantity not in (None, "") and unit_price not in (None, ""):
+                    try:
+                        item["amount"] = int(Decimal(str(quantity)) * Decimal(str(unit_price)))
+                    except Exception:
+                        pass
+                normalized_items.append(item)
+            if normalized_items:
+                ctx["line_items"] = normalized_items
+                first_item = normalized_items[0]
+                for key in ("item_name", "spec", "quantity", "unit_price", "amount", "remark"):
+                    if first_item.get(key) not in (None, ""):
+                        ctx.setdefault(key, first_item[key])
+
         # 셀 매핑 field_map 키와 모델 키 간 alias
         ctx.setdefault("company_name",          ctx["vendor_name"])
         ctx.setdefault("execution_date",        ctx["expense_date"])
@@ -595,6 +624,46 @@ class DocumentSetService:
         # budget_item_checkbox: 유담 지출결의서 B9 체크박스 셀용
         ctx.setdefault("budget_item_checkbox",  _make_budget_checkbox(expense.category_type))
         ctx.setdefault("item_name",             ctx.get("product_name") or expense.title)
+        if company_setting:
+            recipient_contact_parts = [
+                company_setting.default_manager_name,
+                company_setting.phone,
+                company_setting.email,
+            ]
+            recipient_contact = " / ".join(part for part in recipient_contact_parts if part)
+
+            ctx.setdefault("our_company_name", company_setting.company_name or "")
+            ctx.setdefault("our_company_registration_number", company_setting.company_registration_number or "")
+            ctx.setdefault("our_company_address", company_setting.address or "")
+            ctx.setdefault("our_company_business_type", company_setting.business_type or "")
+            ctx.setdefault("our_company_business_item", company_setting.business_item or "")
+            ctx.setdefault("our_company_representative", company_setting.representative_name or "")
+            ctx.setdefault("our_company_contact", recipient_contact)
+            ctx.setdefault("our_company_phone", company_setting.phone or "")
+            ctx.setdefault("our_company_fax", company_setting.fax or "")
+            ctx.setdefault("our_company_email", company_setting.email or "")
+            ctx.setdefault("our_company_manager_name", company_setting.default_manager_name or "")
+
+            ctx.setdefault("recipient_name", company_setting.company_name or "")
+            ctx.setdefault("recipient_registration_number", company_setting.company_registration_number or "")
+            ctx.setdefault("recipient_address", company_setting.address or "")
+            ctx.setdefault("recipient_business_type", company_setting.business_type or "")
+            ctx.setdefault("recipient_business_item", company_setting.business_item or "")
+            ctx.setdefault("recipient_representative", company_setting.representative_name or "")
+            ctx.setdefault("recipient_contact", recipient_contact)
+
+            ctx.setdefault("buyer_name", company_setting.company_name or "")
+            ctx.setdefault("buyer_registration_number", company_setting.company_registration_number or "")
+            ctx.setdefault("buyer_address", company_setting.address or "")
+            ctx.setdefault("buyer_business_type", company_setting.business_type or "")
+            ctx.setdefault("buyer_business_item", company_setting.business_item or "")
+            ctx.setdefault("buyer_representative", company_setting.representative_name or "")
+            ctx.setdefault("buyer_contact", recipient_contact)
+
+            ctx.setdefault("company_business_registration_path", company_setting.company_business_registration_path or "")
+            ctx.setdefault("company_bank_copy_path", company_setting.company_bank_copy_path or "")
+            ctx.setdefault("company_quote_template_path", company_setting.company_quote_template_path or "")
+            ctx.setdefault("company_transaction_statement_template_path", company_setting.company_transaction_statement_template_path or "")
         return ctx
 
     def _project_data(self, project: Project) -> dict[str, Any]:
@@ -626,6 +695,16 @@ class DocumentSetService:
         if not project:
             raise DocumentGenerationError(f"과제를 찾을 수 없습니다: {project_id}")
         return project
+
+    async def _load_company_setting(
+        self,
+        db: AsyncSession,
+        company_id: str = "default",
+    ) -> CompanySetting | None:
+        result = await db.execute(
+            select(CompanySetting).where(CompanySetting.company_id == company_id)
+        )
+        return result.scalar_one_or_none()
 
     async def _load_vendor(
         self,

@@ -90,9 +90,30 @@ export interface ExpenseItem {
   vendor_name: string | null;
   expense_date: string | null;
   status: ExpenseStatus;
-  input_data: Record<string, unknown>;
+  input_data: ExpenseMetadata;
   documents: ExpenseDocument[];
   created_at: string;
+}
+
+export interface ExpenseLineItem {
+  item_name?: string;
+  spec?: string;
+  quantity?: number;
+  unit_price?: number;
+  amount?: number;
+  remark?: string;
+}
+
+export interface ExpenseMetadata {
+  usage_purpose?: string;
+  purchase_purpose?: string;
+  delivery_date?: string;
+  spec?: string;
+  quantity?: number;
+  unit_price?: number;
+  amount?: number;
+  line_items?: ExpenseLineItem[];
+  [key: string]: unknown;
 }
 
 export interface ExpenseCreate {
@@ -103,7 +124,7 @@ export interface ExpenseCreate {
   amount: number;
   vendor_name?: string;
   expense_date?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: ExpenseMetadata;
 }
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -361,4 +382,52 @@ export interface PaginatedResponse<T> {
   total: number;
   page: number;
   size: number;
+}
+
+export type CompanySettingsUploadType =
+  | "business_registration"
+  | "bank_copy"
+  | "quote_template"
+  | "transaction_statement_template"
+  | "seal_image";
+
+export interface CompanySettings {
+  id: string | null;
+  company_id: string;
+  company_name: string | null;
+  company_registration_number: string | null;
+  representative_name: string | null;
+  address: string | null;
+  business_type: string | null;
+  business_item: string | null;
+  phone: string | null;
+  fax: string | null;
+  email: string | null;
+  default_manager_name: string | null;
+  seal_image_path: string | null;
+  company_business_registration_path: string | null;
+  company_bank_copy_path: string | null;
+  company_quote_template_path: string | null;
+  company_transaction_statement_template_path: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface CompanySettingsUpdate {
+  company_id?: string;
+  company_name?: string;
+  company_registration_number?: string;
+  representative_name?: string;
+  address?: string;
+  business_type?: string;
+  business_item?: string;
+  phone?: string;
+  fax?: string;
+  email?: string;
+  default_manager_name?: string;
+  seal_image_path?: string;
+  company_business_registration_path?: string;
+  company_bank_copy_path?: string;
+  company_quote_template_path?: string;
+  company_transaction_statement_template_path?: string;
 }

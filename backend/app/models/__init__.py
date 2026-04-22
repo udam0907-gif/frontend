@@ -5,6 +5,7 @@ from app.models.document import GeneratedDocument, ValidationResult
 from app.models.rcms import RcmsChunk, RcmsManual, RcmsQaSession
 from app.models.audit import AuditLog
 from app.models.vendor import Vendor  # noqa: F401
+from app.models.company_setting import CompanySetting  # noqa: F401
 from app.models import legal  # noqa: F401
 
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     "RcmsQaSession",
     "AuditLog",
     "Vendor",
+    "CompanySetting",
     "legal",
 ]

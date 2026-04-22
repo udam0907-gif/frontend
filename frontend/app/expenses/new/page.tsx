@@ -31,6 +31,12 @@ export default function NewExpensePage() {
     amount: "",
     vendor_name: "",
     expense_date: "",
+    usage_purpose: "",
+    purchase_purpose: "",
+    delivery_date: "",
+    spec: "",
+    quantity: "1",
+    unit_price: "",
   });
   const [error, setError] = useState("");
 
@@ -46,12 +52,38 @@ export default function NewExpensePage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    const quantity = Number(form.quantity || 0);
+    const unitPrice = Number(form.unit_price || 0);
+    const lineAmount =
+      quantity > 0 && unitPrice >= 0 ? quantity * unitPrice : undefined;
+
     mutation.mutate({
-      ...form,
+      project_id: form.project_id,
+      category_type: form.category_type,
+      title: form.title,
+      description: form.description || undefined,
       amount: Number(form.amount),
       vendor_name: form.vendor_name || undefined,
       expense_date: form.expense_date || undefined,
-      description: form.description || undefined,
+      metadata: {
+        usage_purpose: form.usage_purpose || undefined,
+        purchase_purpose: form.purchase_purpose || undefined,
+        delivery_date: form.delivery_date || undefined,
+        spec: form.spec || undefined,
+        quantity: quantity || undefined,
+        unit_price: unitPrice || undefined,
+        amount: lineAmount,
+        line_items: [
+          {
+            item_name: form.title || undefined,
+            spec: form.spec || undefined,
+            quantity: quantity || undefined,
+            unit_price: unitPrice || undefined,
+            amount: lineAmount,
+          },
+        ],
+      },
     });
   };
 
@@ -115,7 +147,7 @@ export default function NewExpensePage() {
                 </select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="amount">금액 (원) *</Label>
+                <Label htmlFor="amount">금액 *</Label>
                 <Input
                   id="amount"
                   type="number"
@@ -135,7 +167,7 @@ export default function NewExpensePage() {
                 required
                 value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
-                placeholder="예: 분석 장비 외주 용역"
+                placeholder="예: 시약 구매, 분석 용역"
               />
             </div>
 
@@ -173,8 +205,95 @@ export default function NewExpensePage() {
                 onChange={(e) =>
                   setForm({ ...form, description: e.target.value })
                 }
-                placeholder="집행 내용 요약 (선택)"
+                placeholder="집행 내용 요약"
               />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="usage_purpose">사용 목적</Label>
+                <Textarea
+                  id="usage_purpose"
+                  rows={2}
+                  value={form.usage_purpose}
+                  onChange={(e) =>
+                    setForm({ ...form, usage_purpose: e.target.value })
+                  }
+                  placeholder="해당 품목의 사용 목적"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="purchase_purpose">구매 목적</Label>
+                <Textarea
+                  id="purchase_purpose"
+                  rows={2}
+                  value={form.purchase_purpose}
+                  onChange={(e) =>
+                    setForm({ ...form, purchase_purpose: e.target.value })
+                  }
+                  placeholder="구매 필요성과 집행 목적"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="delivery_date">납품일</Label>
+              <Input
+                id="delivery_date"
+                type="date"
+                value={form.delivery_date}
+                onChange={(e) =>
+                  setForm({ ...form, delivery_date: e.target.value })
+                }
+              />
+            </div>
+
+            <div className="space-y-3 rounded-lg border border-gray-200 p-4">
+              <div>
+                <p className="text-sm font-medium text-gray-900">품목 상세</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  DOCX line item 및 품의서 context에 사용됩니다.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="spec">규격</Label>
+                <Input
+                  id="spec"
+                  value={form.spec}
+                  onChange={(e) => setForm({ ...form, spec: e.target.value })}
+                  placeholder="예: A4, 80g, 500매"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="quantity">수량</Label>
+                  <Input
+                    id="quantity"
+                    type="number"
+                    min={1}
+                    value={form.quantity}
+                    onChange={(e) =>
+                      setForm({ ...form, quantity: e.target.value })
+                    }
+                    placeholder="1"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="unit_price">단가</Label>
+                  <Input
+                    id="unit_price"
+                    type="number"
+                    min={0}
+                    value={form.unit_price}
+                    onChange={(e) =>
+                      setForm({ ...form, unit_price: e.target.value })
+                    }
+                    placeholder="0"
+                  />
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>

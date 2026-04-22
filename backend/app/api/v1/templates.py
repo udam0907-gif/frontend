@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +11,7 @@ from app.core.logging import get_logger
 from app.database import get_db
 from app.models.enums import CategoryType, DocumentType
 from app.models.template import Template
+from app.schemas.layout_map import LAYOUT_DRAFTS, LayoutMap
 from app.schemas.template import TemplateRead, TemplateUpdate
 from app.services.template_service import TemplateService
 
@@ -85,6 +87,17 @@ async def upload_template(
     return template
 
 
+@router.get("/fields/registry")
+async def get_field_registry() -> dict:
+    """지원 필드 레지스트리 조회 (UI 셀 매핑 설정 화면용)"""
+    return {
+        "fields": [
+            {"key": k, **v}
+            for k, v in _FIELD_REGISTRY.items()
+        ]
+    }
+
+
 @router.get("/{template_id}", response_model=TemplateRead)
 async def get_template(
     template_id: uuid.UUID,
@@ -130,6 +143,132 @@ async def get_template_fields(
         "template_name": template.name,
         "field_map": template.field_map,
     }
+
+
+# 지원 필드 레지스트리: 한국어 레이블 + 타입 + 기본 필수 여부
+_FIELD_REGISTRY: dict[str, dict] = {
+    "company_name":          {"label": "업체명",       "type": "text",   "required": True},
+    "execution_date":        {"label": "집행일자",      "type": "date",   "required": True},
+    "budget_item":           {"label": "예산항목",      "type": "text",   "required": True},
+    "note":                  {"label": "비고",          "type": "text",   "required": False},
+    "item_name":             {"label": "품명",          "type": "text",   "required": True},
+    "quantity":              {"label": "수량",          "type": "number", "required": True},
+    "unit_price":            {"label": "단가",          "type": "number", "required": True},
+    "amount":                {"label": "금액",          "type": "number", "required": True},
+    "project_name":          {"label": "과제명",        "type": "text",   "required": False},
+    "vendor_registration":   {"label": "사업자등록번호","type": "text",   "required": False},
+    "spec":                  {"label": "규격",          "type": "text",   "required": False},
+    "total_vat":             {"label": "부가세",        "type": "number", "required": False},
+    "total_supply_amount":   {"label": "공급가액",      "type": "number", "required": False},
+    "execution_type":        {"label": "집행구분",      "type": "text",   "required": False},
+    "manager_name":          {"label": "담당자명",      "type": "text",   "required": False},
+    "project_number":        {"label": "과제번호",      "type": "text",   "required": False},
+    "delivery_date":         {"label": "납품일자",      "type": "date",   "required": False},
+    "project_period":        {"label": "연구기간",      "type": "text",   "required": False},
+    "usage_purpose":         {"label": "사용목적",      "type": "text",   "required": False},
+    "purchase_purpose":      {"label": "구매목적",      "type": "text",   "required": False},
+    "remark":                {"label": "비고(품목)",    "type": "text",   "required": False},
+    "total_amount":          {"label": "합계금액",      "type": "number", "required": False},
+    "vendor_name":           {"label": "업체명(거래처)", "type": "text",  "required": False},
+    "budget_item_checkbox":  {"label": "예산항목(체크박스)", "type": "text", "required": False},
+}
+
+
+class CellMappingRequest(BaseModel):
+    """
+    XLSX 템플릿 필드 → 셀 주소 매핑 설정.
+    {"company_name": "B4", "execution_date": "D6", "amount": "F10"}
+    - 레지스트리에 있는 필드는 label/type 자동 적용
+    - 없는 필드도 허용 (커스텀 필드)
+    - source 등 메타는 _meta 서브키로 분리
+    """
+    mapping: dict[str, str]
+
+
+@router.put("/{template_id}/cell-mapping", response_model=TemplateRead)
+async def set_cell_mapping(
+    template_id: uuid.UUID,
+    payload: CellMappingRequest,
+    db: AsyncSession = Depends(get_db),
+) -> Template:
+    """XLSX 템플릿의 필드별 셀 주소를 저장한다."""
+    template = await _get_or_404(template_id, db)
+
+    current_map: dict = dict(template.field_map or {})
+
+    for field_key, cell_address in payload.mapping.items():
+        cell_address = cell_address.strip().upper()
+        registry = _FIELD_REGISTRY.get(field_key, {})
+
+        if field_key in current_map and isinstance(current_map[field_key], dict):
+            existing = current_map[field_key]
+            existing["cell"] = cell_address
+            # label/type은 레지스트리 값으로 갱신, 없으면 기존 유지
+            if registry:
+                existing.setdefault("label", registry["label"])
+                existing.setdefault("type", registry["type"])
+                existing.setdefault("required", registry["required"])
+            # source → _meta로 이전
+            if "source" in existing:
+                existing.setdefault("_meta", {})["source"] = existing.pop("source")
+        else:
+            entry: dict = {
+                "label":    registry.get("label",    field_key.replace("_", " ").title()),
+                "type":     registry.get("type",     "text"),
+                "required": registry.get("required", False),
+                "cell":     cell_address,
+            }
+            current_map[field_key] = entry
+
+    template.field_map = current_map
+    await db.flush()
+    await db.refresh(template)
+
+    logger.info(
+        "cell_mapping_saved",
+        template_id=str(template_id),
+        fields=list(payload.mapping.keys()),
+    )
+    return template
+
+
+@router.get("/layouts/drafts")
+async def get_layout_drafts() -> dict:
+    """문서 타입별 layout_map 구조 초안 조회."""
+    return {
+        doc_type: layout.to_dict()
+        for doc_type, layout in LAYOUT_DRAFTS.items()
+    }
+
+
+@router.get("/{template_id}/layout-map")
+async def get_layout_map(
+    template_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """저장된 layout_map 조회. 없으면 해당 document_type 초안 반환."""
+    template = await _get_or_404(template_id, db)
+    if template.layout_map:
+        return {"template_id": str(template_id), "layout_map": template.layout_map, "source": "saved"}
+    draft = LAYOUT_DRAFTS.get(template.document_type.value)
+    if draft:
+        return {"template_id": str(template_id), "layout_map": draft.to_dict(), "source": "draft"}
+    return {"template_id": str(template_id), "layout_map": None, "source": "none"}
+
+
+@router.put("/{template_id}/layout-map", response_model=TemplateRead)
+async def set_layout_map(
+    template_id: uuid.UUID,
+    payload: LayoutMap,
+    db: AsyncSession = Depends(get_db),
+) -> Template:
+    """layout_map 저장. field_map은 변경하지 않는다."""
+    template = await _get_or_404(template_id, db)
+    template.layout_map = payload.to_dict()
+    await db.flush()
+    await db.refresh(template)
+    logger.info("layout_map_saved", template_id=str(template_id), document_type=payload.document_type)
+    return template
 
 
 async def _get_or_404(template_id: uuid.UUID, db: AsyncSession) -> Template:

@@ -252,11 +252,11 @@ async def get_latest_document_set(
         batch = [d for d in all_docs if abs((latest_ts - d.created_at).total_seconds()) < 5]
 
     status_map = {
-        "vendor_copy": "vendor_copy",
-        "docx_rendered": "generated",
-        "xlsx_rendered": "generated",
-        "excel_mapping_needed": "excel_mapping_needed",
-        "passthrough_copy": "passthrough_copy",
+        "excel_rendered":            "excel_rendered",
+        "docx_rendered":             "excel_rendered",
+        "vendor_attachment_included":"vendor_attachment_included",
+        "mapping_needed":            "mapping_needed",
+        "render_failed":             "render_failed",
     }
 
     items = []
@@ -268,16 +268,21 @@ async def get_latest_document_set(
             "output_path": doc.output_path,
             "generated_document_id": str(doc.id),
             "error_message": None,
-            "is_vendor_doc": trace.get("render_mode") == "vendor_copy",
+            "is_vendor_doc": trace.get("render_mode") == "vendor_attachment_included",
         })
+
+    _ok   = {"excel_rendered", "vendor_attachment_included", "mapping_needed"}
+    _err  = {"render_failed", "template_missing", "vendor_file_missing"}
+    gen   = sum(1 for i in items if i["status"] in _ok)
+    errs  = sum(1 for i in items if i["status"] in _err)
 
     return {
         "expense_item_id": str(expense_id),
         "category_type": expense.category_type.value,
         "total": len(items),
-        "generated": len(items),
-        "errors": 0,
-        "all_generated": True,
+        "generated": gen,
+        "errors": errs,
+        "all_generated": errs == 0,
         "items": items,
     }
 

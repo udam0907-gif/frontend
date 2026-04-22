@@ -31,6 +31,7 @@ class TemplateUpdate(BaseModel):
     description: str | None = None
     is_active: bool | None = None
     field_map: dict[str, Any] | None = None
+    layout_map: dict[str, Any] | None = None
 
 
 class TemplateRead(BaseModel):
@@ -44,6 +45,7 @@ class TemplateRead(BaseModel):
     file_path: str
     version: str
     field_map: dict[str, Any]
+    layout_map: dict[str, Any] | None = None
     is_active: bool
     description: str | None
     project_id: uuid.UUID | None = None

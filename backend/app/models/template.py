@@ -28,14 +28,11 @@ class Template(Base, TimestampMixin):
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[str] = mapped_column(String(50), nullable=False, default="1.0.0")
     field_map: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    # field_map structure: {
-    #   "placeholder_name": {
-    #     "label": "한국어 레이블",
-    #     "type": "text|number|date|helper_text",
-    #     "required": true,
-    #     "source": "user_input|project_data|llm_generated"
-    #   }
-    # }
+    # field_map: 기존 flat 구조 — 렌더링 엔진이 현재 사용
+    #   {"field_key": {"label": "...", "type": "...", "cell": "B4", ...}}
+    layout_map: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    # layout_map: 확장 구조 명세 — 미래 렌더러·검증 엔진용 (현재 렌더러는 미사용)
+    #   {"document_type": "...", "scalar_fields": {...}, "checkbox_fields": {...}, "table_fields": {...}}
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     project_id: Mapped[uuid.UUID | None] = mapped_column(

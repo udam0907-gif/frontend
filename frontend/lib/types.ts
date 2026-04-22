@@ -305,14 +305,29 @@ export interface VendorCreate {
 // ─── Document Set ─────────────────────────────────────────────────────────────
 
 export type DocSetItemStatus =
-  | "generated"              // DOCX/XLSX 렌더링 완료
-  | "vendor_copy"            // 업체 파일 복사 (사업자등록증/통장사본/PDF 등)
-  | "vendor_template_used"   // 업체 원본 양식 사용하여 렌더링 완료
-  | "excel_mapping_needed"   // XLSX 원본 복사됨, placeholder 없음
-  | "passthrough_copy"       // PDF/이미지 원본 포함, 값 삽입 불가
-  | "template_missing"       // 어느 소스에서도 파일 없음
-  | "vendor_file_missing"    // 업체/비교견적업체 파일 슬롯 비어 있음
-  | "error";                 // 렌더링 예외
+  | "excel_rendered"              // XLSX 셀 매핑으로 값 입력 완료 (업체 양식 포함)
+  | "vendor_attachment_included"  // 업체 파일 바이너리 첨부 (사업자등록증/통장사본 등)
+  | "mapping_needed"              // XLSX이지만 셀 매핑 미설정 (원본 복사)
+  | "render_failed"               // 렌더링 예외
+  | "template_missing"            // 어느 소스에서도 파일 없음
+  | "vendor_file_missing";        // 업체/비교견적업체 파일 슬롯 비어 있음
+
+// ─── Cell Mapping ────────────────────────────────────────────────────────────
+
+export interface FieldRegistryItem {
+  key: string;
+  label: string;
+  type: "text" | "number" | "date";
+  required: boolean;
+}
+
+export interface FieldMapEntry {
+  label: string;
+  type: string;
+  required: boolean;
+  cell?: string;
+  _meta?: { source?: string };
+}
 
 export interface DocSetItem {
   document_type: string;

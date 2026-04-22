@@ -101,6 +101,29 @@ COMPARATIVE_DOC = DocumentType.comparative_quote
 # 비교견적 금액 배율
 COMPARATIVE_MULTIPLIER = Decimal("1.1")
 
+# CategoryType → 지출결의서 체크박스 레이블 매핑
+_CATEGORY_LABEL: dict[str, str] = {
+    "materials":   "연구재료비",
+    "labor":       "인건비",
+    "outsourcing": "연구활동비",
+    "meeting":     "연구활동비",
+    "test_report": "연구활동비",
+    "other":       "간접비",
+}
+
+# 지출결의서 체크박스 항목 순서 (유담 양식 기준)
+_CHECKBOX_ITEMS = ["연구재료비", "인건비", "연구활동비", "간접비", "연구수당"]
+
+
+def _make_budget_checkbox(category_type: CategoryType) -> str:
+    """선택된 항목에 ■, 나머지에 □를 붙여 전체 체크박스 문자열 반환."""
+    label = _CATEGORY_LABEL.get(category_type.value, "")
+    return "   ".join(
+        f"{'■' if item == label else '□'} {item}"
+        for item in _CHECKBOX_ITEMS
+    )
+
+
 # 내부 템플릿(과제 공통 양식)에서 가져오는 문서 (위에 없는 모든 나머지)
 # = Template 테이블에서 조회
 
@@ -109,14 +132,13 @@ COMPARATIVE_MULTIPLIER = Decimal("1.1")
 class DocSetItem:
     document_type: DocumentType
     # 상태 코드
-    # "generated"           — DOCX/XLSX 렌더링 완료
-    # "vendor_copy"         — 업체 파일 바이너리 복사 (사업자등록증/통장사본/PDF 등)
-    # "vendor_template_used"— 업체 원본 양식 사용 렌더링 완료
-    # "excel_mapping_needed"— XLSX 파일이지만 셀 매핑 미구현 (원본 복사)
-    # "passthrough_copy"    — PDF/이미지 원본 포함 (값 삽입 불가)
-    # "template_missing"    — 어떤 소스에서도 파일을 찾지 못함
-    # "vendor_file_missing" — 업체가 없거나 파일 슬롯이 비어 있음
-    # "error"               — 렌더링 중 예외 발생
+    # "excel_rendered"            — XLSX 셀 매핑으로 값 입력 완료 (업체 양식 포함)
+    # "vendor_attachment_included"— 업체 파일 바이너리 첨부 (사업자등록증/통장사본 등)
+    # "mapping_needed"            — XLSX이지만 셀 매핑 미설정 (원본 복사)
+    # "render_failed"             — 렌더링 중 예외 발생
+    # "template_missing"          — 어떤 소스에서도 파일을 찾지 못함
+    # "vendor_file_missing"       — 업체가 없거나 파일 슬롯이 비어 있음
+    # is_vendor_doc 플래그로 업체 양식 여부를 별도 표시 (상태값과 독립)
     status: str
     output_path: str | None = None
     generated_document_id: uuid.UUID | None = None
@@ -134,15 +156,14 @@ class DocumentSetResult:
     def generated_count(self) -> int:
         return sum(
             1 for i in self.items
-            if i.status in ("generated", "vendor_copy", "vendor_template_used",
-                            "excel_mapping_needed", "passthrough_copy")
+            if i.status in ("excel_rendered", "vendor_attachment_included", "mapping_needed")
         )
 
     @property
     def error_count(self) -> int:
         return sum(
             1 for i in self.items
-            if i.status in ("template_missing", "vendor_file_missing", "error")
+            if i.status in ("template_missing", "vendor_file_missing", "render_failed")
         )
 
     @property
@@ -328,7 +349,7 @@ class DocumentSetService:
             expense_item_id=expense.id,
             template_id=None,
             output_path=dest_path,
-            generation_trace={"render_mode": "vendor_copy", "source": attr, "document_type": doc_type.value, "batch_id": batch_id},
+            generation_trace={"render_mode": "vendor_attachment_included", "source": attr, "document_type": doc_type.value, "batch_id": batch_id},
             is_valid=True,
         )
         db.add(gen_doc)
@@ -336,7 +357,7 @@ class DocumentSetService:
 
         return DocSetItem(
             document_type=doc_type,
-            status="vendor_copy",
+            status="vendor_attachment_included",
             output_path=dest_path,
             generated_document_id=gen_doc.id,
             is_vendor_doc=True,
@@ -371,10 +392,19 @@ class DocumentSetService:
                 error_message=f"업체 원본 양식 미등록: {attr}",
                 is_vendor_doc=True,
             )
+        # 같은 document_type의 DB 템플릿 field_map을 vendor 파일에 적용
+        db_template = await self._find_template(
+            category_type=expense.category_type,
+            document_type=doc_type,
+            project_id=expense.project_id,
+            db=db,
+        )
+        field_map = db_template.field_map if db_template else {}
+
         return await self._render_from_template(
             doc_type=doc_type,
             template_path=file_path,
-            field_map={},
+            field_map=field_map,
             context=context,
             project_data=project_data,
             expense=expense,
@@ -382,7 +412,6 @@ class DocumentSetService:
             generator=generator,
             db=db,
             is_vendor_doc=True,
-            override_status_success="vendor_template_used",
             batch_id=batch_id,
         )
 
@@ -427,14 +456,24 @@ class DocumentSetService:
         context["total_amount"] = compare_amount
         context["unit_price"] = compare_amount
         context["vendor_name"] = compare_vendor.name
+        context["company_name"] = compare_vendor.name   # alias
         context["comparative_note"] = (
             f"비교견적 ({compare_vendor.name} · 원견적 {int(expense.amount):,}원 기준 10% 인상)"
         )
 
+        # quote 문서 유형의 DB field_map을 비교견적서에도 적용
+        db_template = await self._find_template(
+            category_type=expense.category_type,
+            document_type=DocumentType.quote,
+            project_id=expense.project_id,
+            db=db,
+        )
+        field_map = db_template.field_map if db_template else {}
+
         return await self._render_from_template(
             doc_type=COMPARATIVE_DOC,
             template_path=file_path,
-            field_map={},
+            field_map=field_map,
             context=context,
             project_data=project_data,
             expense=expense,
@@ -442,7 +481,6 @@ class DocumentSetService:
             generator=generator,
             db=db,
             is_vendor_doc=True,
-            override_status_success="vendor_template_used",
             batch_id=batch_id,
         )
 
@@ -460,7 +498,6 @@ class DocumentSetService:
         generator: DocumentGenerator,
         db: AsyncSession | None,
         is_vendor_doc: bool,
-        override_status_success: str = "generated",
         db_template_id: uuid.UUID | None = None,
         batch_id: str = "",
     ) -> DocSetItem:
@@ -472,19 +509,22 @@ class DocumentSetService:
                 project_data=project_data,
                 expense_item_id=str(expense.id),
                 template_id=template_id,
+                document_type=doc_type.value,
             )
 
-            render_mode = gen_result.get("render_mode", "docx_rendered")
+            render_mode = gen_result.get("render_mode", "")
 
             # render_mode → status 매핑
-            if render_mode in ("docx_rendered", "xlsx_rendered"):
-                final_status = override_status_success
-            elif render_mode == "excel_mapping_needed":
-                final_status = "excel_mapping_needed"
+            if render_mode == "docx_rendered":
+                final_status = "docx_rendered"
+            elif render_mode == "excel_rendered":
+                final_status = "excel_rendered"
+            elif render_mode == "mapping_needed":
+                final_status = "mapping_needed"
             elif render_mode == "passthrough_copy":
-                final_status = "vendor_copy" if is_vendor_doc else "passthrough_copy"
+                final_status = "vendor_attachment_included" if is_vendor_doc else "mapping_needed"
             else:
-                final_status = override_status_success
+                final_status = "excel_rendered"
 
             gen_doc_id: uuid.UUID | None = None
             if db is not None:
@@ -520,7 +560,7 @@ class DocumentSetService:
             )
             return DocSetItem(
                 document_type=doc_type,
-                status="error",
+                status="render_failed",
                 error_message=str(e),
                 is_vendor_doc=is_vendor_doc,
             )
@@ -530,20 +570,31 @@ class DocumentSetService:
     def _build_context(self, expense: ExpenseItem, project: Project) -> dict[str, Any]:
         meta = expense.metadata_ or {}
         ctx: dict[str, Any] = {
-            "expense_date": expense.expense_date or "",
-            "vendor_name": expense.vendor_name or "",
-            "vendor_registration": expense.vendor_registration_number or "",
-            "amount": int(expense.amount),
-            "total_amount": int(expense.amount),
-            "title": expense.title,
-            "project_name": project.name,
-            "project_code": project.code,
-            "institution": project.institution,
-            "pi_name": project.principal_investigator,
+            "expense_date":       expense.expense_date or "",
+            "vendor_name":        expense.vendor_name or "",
+            "vendor_registration":expense.vendor_registration_number or "",
+            "amount":             int(expense.amount),
+            "total_amount":       int(expense.amount),
+            "title":              expense.title,
+            "project_name":       project.name,
+            "project_code":       project.code,
+            "institution":        project.institution,
+            "pi_name":            project.principal_investigator,
+            "category_type":      expense.category_type.value,  # checkbox 매핑용
         }
         for key, value in meta.items():
             if value is not None and key not in ("vendor_id", "compare_vendor_id", "compare_amount"):
                 ctx[key] = value
+
+        # 셀 매핑 field_map 키와 모델 키 간 alias
+        ctx.setdefault("company_name",          ctx["vendor_name"])
+        ctx.setdefault("execution_date",        ctx["expense_date"])
+        # budget_item: 단순 텍스트 레이블 (cfbfee34 단순 양식용)
+        cat_label = _CATEGORY_LABEL.get(expense.category_type.value, expense.category_type.value)
+        ctx.setdefault("budget_item",           cat_label)
+        # budget_item_checkbox: 유담 지출결의서 B9 체크박스 셀용
+        ctx.setdefault("budget_item_checkbox",  _make_budget_checkbox(expense.category_type))
+        ctx.setdefault("item_name",             ctx.get("product_name") or expense.title)
         return ctx
 
     def _project_data(self, project: Project) -> dict[str, Any]:

@@ -15,6 +15,7 @@ import type {
   Vendor,
   VendorCreate,
   DocumentSetResponse,
+  FieldRegistryItem,
 } from "./types";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -87,6 +88,16 @@ export const templatesApi = {
 
   deactivate: (id: string) =>
     apiClient.delete(`/templates/${id}`).then((r) => r.data),
+
+  getFieldRegistry: () =>
+    apiClient
+      .get<{ fields: FieldRegistryItem[] }>("/templates/fields/registry")
+      .then((r) => r.data.fields),
+
+  setCellMapping: (id: string, mapping: Record<string, string>) =>
+    apiClient
+      .put<Template>(`/templates/${id}/cell-mapping`, { mapping })
+      .then((r) => r.data),
 };
 
 // ─── Expenses ────────────────────────────────────────────────────────────────

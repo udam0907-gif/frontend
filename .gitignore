@@ -43,6 +43,7 @@ design_images/
 *.md
 !README.md
 !CLAUDE.md
+!HANDOFF.md
 !backend/README.md
 !frontend/README.md
 !skills/*.md

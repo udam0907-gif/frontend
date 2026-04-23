@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { expensesApi, validationApi, exportApi } from "@/lib/api";
 import { CATEGORY_LABELS, EXPENSE_STATUS_COLORS, EXPENSE_STATUS_LABELS, REQUIRED_DOCS } from "@/lib/constants";
@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Upload, CheckCircle2, XCircle, AlertTriangle, Download, FileText } from "lucide-react";
+import { ArrowLeft, Upload, CheckCircle2, XCircle, AlertTriangle, Download, ImageIcon, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { use } from "react";
 import { formatCurrency } from "@/lib/utils";
@@ -22,6 +22,9 @@ export default function ExpenseDetailPage({
   const { id } = use(params);
   const queryClient = useQueryClient();
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
+  const [inspectionStatus, setInspectionStatus] = useState<string>("");
+  const [inspectionPreviewUrl, setInspectionPreviewUrl] = useState<string | null>(null);
+  const [isDragOverInspection, setIsDragOverInspection] = useState(false);
 
   const { data: expense, isLoading } = useQuery({
     queryKey: ["expense", id],
@@ -61,6 +64,24 @@ export default function ExpenseDetailPage({
     }
   };
 
+  const deleteDocumentMutation = useMutation({
+    mutationFn: ({ expenseId, documentId }: { expenseId: string; documentId: string }) =>
+      expensesApi.deleteDocument(expenseId, documentId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["expense", id] });
+      setInspectionStatus("검수 이미지가 삭제되었습니다.");
+      setInspectionPreviewUrl(null);
+    },
+  });
+
+  useEffect(() => {
+    return () => {
+      if (inspectionPreviewUrl) {
+        URL.revokeObjectURL(inspectionPreviewUrl);
+      }
+    };
+  }, [inspectionPreviewUrl]);
+
   if (isLoading) {
     return (
       <div className="space-y-4 max-w-3xl">
@@ -77,6 +98,33 @@ export default function ExpenseDetailPage({
   const uploadedDocTypes = new Set(
     expense.documents?.map((d) => d.document_type) ?? []
   );
+  const isMaterials = expense.category_type === "materials";
+  const inspectionImage = expense.documents?.find((doc) => doc.document_type === "inspection_photos") ?? null;
+
+  const handleInspectionImageUpload = async (file: File) => {
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    if (!ext || !["jpg", "jpeg", "png"].includes(ext)) {
+      setInspectionStatus("JPG, JPEG, PNG 파일만 업로드할 수 있습니다.");
+      return;
+    }
+
+    if (inspectionPreviewUrl) {
+      URL.revokeObjectURL(inspectionPreviewUrl);
+    }
+    setInspectionPreviewUrl(URL.createObjectURL(file));
+    setInspectionStatus(`파일 선택됨: ${file.name}`);
+    setUploadingDoc("inspection_photos");
+
+    try {
+      await expensesApi.uploadDocument(id, "inspection_photos", file);
+      setInspectionStatus(`업로드 완료: ${file.name}`);
+      queryClient.invalidateQueries({ queryKey: ["expense", id] });
+    } catch (error) {
+      setInspectionStatus(error instanceof Error ? error.message : "검수 이미지 업로드에 실패했습니다.");
+    } finally {
+      setUploadingDoc(null);
+    }
+  };
 
   return (
     <div className="max-w-3xl space-y-5">
@@ -133,6 +181,91 @@ export default function ExpenseDetailPage({
           )}
         </CardContent>
       </Card>
+
+      {isMaterials && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">검수 이미지</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div
+              className={`rounded-lg border-2 border-dashed p-4 transition-colors ${
+                isDragOverInspection ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-gray-50"
+              }`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragOverInspection(true);
+              }}
+              onDragLeave={() => setIsDragOverInspection(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragOverInspection(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) void handleInspectionImageUpload(file);
+              }}
+            >
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                    <ImageIcon className="h-4 w-4" />
+                    검수확인서 삽입용 이미지
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    JPG, JPEG, PNG 파일을 드래그하거나 선택하면 바로 업로드됩니다.
+                  </p>
+                  {inspectionImage && (
+                    <p className="text-xs text-green-700">
+                      현재 업로드된 파일: {inspectionImage.filename}
+                    </p>
+                  )}
+                  {inspectionStatus && (
+                    <p className={`text-xs ${inspectionStatus.includes("실패") || inspectionStatus.includes("없") ? "text-red-600" : "text-blue-600"}`}>
+                      {uploadingDoc === "inspection_photos" ? "업로드 중..." : inspectionStatus}
+                    </p>
+                  )}
+                </div>
+                <label className="cursor-pointer">
+                  <input
+                    type="file"
+                    accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void handleInspectionImageUpload(file);
+                    }}
+                  />
+                  <span className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50">
+                    <Upload className="h-3.5 w-3.5" />
+                    {inspectionImage ? "교체" : "파일 선택"}
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {(inspectionPreviewUrl || inspectionImage) && (
+              <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-white px-3 py-2">
+                <div className="text-sm text-gray-700">
+                  {inspectionPreviewUrl
+                    ? `선택된 파일: ${inspectionStatus.replace("파일 선택됨: ", "").replace("업로드 완료: ", "")}`
+                    : `저장된 파일: ${inspectionImage?.filename}`}
+                </div>
+                {inspectionImage && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => deleteDocumentMutation.mutate({ expenseId: id, documentId: inspectionImage.id })}
+                    disabled={deleteDocumentMutation.isPending}
+                  >
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    삭제
+                  </Button>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Required Documents */}
       <Card>

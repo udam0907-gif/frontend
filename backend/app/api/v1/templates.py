@@ -4,11 +4,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.database import get_db
+from app.models.document import GeneratedDocument
 from app.models.enums import CategoryType, DocumentType
 from app.models.template import Template
 from app.schemas.layout_map import LAYOUT_DRAFTS, LayoutMap
@@ -128,6 +129,11 @@ async def delete_template(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     template = await _get_or_404(template_id, db)
+    await db.execute(
+        update(GeneratedDocument)
+        .where(GeneratedDocument.template_id == template_id)
+        .values(template_id=None)
+    )
     _template_service.delete_file(template.file_path)
     await db.delete(template)
 

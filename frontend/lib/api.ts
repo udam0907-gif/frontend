@@ -140,6 +140,9 @@ export const expensesApi = {
       })
       .then((r) => r.data);
   },
+
+  deleteDocument: (expenseId: string, documentId: string) =>
+    apiClient.delete(`/expenses/${expenseId}/documents/${documentId}`).then((r) => r.data),
 };
 
 // ─── Validation ──────────────────────────────────────────────────────────────

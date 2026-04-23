@@ -76,8 +76,13 @@ export interface Template {
 export interface ExpenseDocument {
   id: string;
   document_type: string;
-  original_filename: string;
+  filename: string;
+  file_path: string;
+  file_size?: number | null;
+  mime_type?: string | null;
   upload_status: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ExpenseItem {

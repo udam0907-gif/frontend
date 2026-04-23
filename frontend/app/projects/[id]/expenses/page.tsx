@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { expensesApi, projectsApi, vendorsApi } from "@/lib/api";
@@ -141,6 +141,11 @@ export default function ProjectExpensesPage() {
     title: "", amount: "", quantity: "", unitPrice: "",
     vendorId: "", vendorName: "", compareVendorId: "", expenseDate: "", note: "",
   });
+  const [inspectionDragId, setInspectionDragId] = useState<string | null>(null);
+  const [inspectionUploadingId, setInspectionUploadingId] = useState<string | null>(null);
+  const [inspectionMessages, setInspectionMessages] = useState<
+    Record<string, { type: "success" | "error" | "info"; text: string }>
+  >({});
 
   const { data: project } = useQuery({
     queryKey: ["project", projectId],
@@ -159,6 +164,9 @@ export default function ProjectExpensesPage() {
     queryFn: () => expensesApi.list(projectId),
     enabled: !!projectId,
   });
+  const latestMaterialsExpense = (expenses ?? []).find(
+    (expense) => expense.category_type === "materials"
+  );
 
   const needsComparative = COMPARATIVE_CATEGORIES.includes(base.categoryType);
 
@@ -327,6 +335,63 @@ export default function ProjectExpensesPage() {
   const handleDelete = (expense: import("@/lib/types").ExpenseItem) => {
     if (!window.confirm(`"${expense.title}" 비용집행 항목을 삭제하시겠습니까?\n생성된 문서도 함께 삭제됩니다.`)) return;
     deleteMutation.mutate(expense.id);
+  };
+
+  const setInspectionMessage = (
+    expenseId: string,
+    type: "success" | "error" | "info",
+    text: string
+  ) => {
+    setInspectionMessages((prev) => ({ ...prev, [expenseId]: { type, text } }));
+  };
+
+  const isAllowedInspectionImage = (file: File) => {
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    return ["jpg", "jpeg", "png"].includes(ext ?? "");
+  };
+
+  const handleInspectionImageUpload = async (expenseId: string, file: File | null | undefined) => {
+    if (!file) return;
+    if (!isAllowedInspectionImage(file)) {
+      setInspectionMessage(expenseId, "error", "JPG, JPEG, PNG 파일만 업로드할 수 있습니다.");
+      return;
+    }
+
+    setInspectionUploadingId(expenseId);
+    setInspectionMessage(expenseId, "info", `${file.name} 업로드 중...`);
+    try {
+      await expensesApi.uploadDocument(expenseId, "inspection_photos", file);
+      setInspectionMessage(expenseId, "success", `${file.name} 업로드 완료`);
+      await queryClient.invalidateQueries({ queryKey: ["expenses", projectId] });
+    } catch (err) {
+      setInspectionMessage(
+        expenseId,
+        "error",
+        err instanceof Error ? err.message : "검수 이미지 업로드에 실패했습니다."
+      );
+    } finally {
+      setInspectionUploadingId(null);
+      setInspectionDragId(null);
+    }
+  };
+
+  const handleInspectionImageDelete = async (expenseId: string, documentId: string) => {
+    if (!window.confirm("등록된 검수 이미지를 삭제하시겠습니까?")) return;
+    setInspectionUploadingId(expenseId);
+    setInspectionMessage(expenseId, "info", "검수 이미지 삭제 중...");
+    try {
+      await expensesApi.deleteDocument(expenseId, documentId);
+      setInspectionMessage(expenseId, "success", "검수 이미지가 삭제되었습니다.");
+      await queryClient.invalidateQueries({ queryKey: ["expenses", projectId] });
+    } catch (err) {
+      setInspectionMessage(
+        expenseId,
+        "error",
+        err instanceof Error ? err.message : "검수 이미지 삭제에 실패했습니다."
+      );
+    } finally {
+      setInspectionUploadingId(null);
+    }
   };
 
   const handleSubmit = () => {
@@ -653,40 +718,147 @@ export default function ProjectExpensesPage() {
             )}
 
             {base.categoryType === "materials" && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1.5 sm:col-span-3">
-                  <Label>상품명</Label>
-                  <Input
-                    placeholder="예: NVIDIA A100 GPU"
-                    value={materials.productName}
-                    onChange={(e) => setMaterials((f) => ({ ...f, productName: e.target.value }))}
-                  />
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="space-y-1.5 sm:col-span-3">
+                    <Label>상품명</Label>
+                    <Input
+                      placeholder="예: NVIDIA A100 GPU"
+                      value={materials.productName}
+                      onChange={(e) => setMaterials((f) => ({ ...f, productName: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>수량</Label>
+                    <Input
+                      type="number"
+                      placeholder="0"
+                      value={base.quantity}
+                      onChange={(e) => setBase((f) => ({ ...f, quantity: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>단가 (원)</Label>
+                    <Input
+                      type="number"
+                      placeholder="0"
+                      value={base.unitPrice}
+                      onChange={(e) => setBase((f) => ({ ...f, unitPrice: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>금액 (자동계산)</Label>
+                    <Input
+                      readOnly
+                      className="bg-gray-50 font-semibold"
+                      value={materialsAutoAmount !== null ? formatCurrency(materialsAutoAmount) : ""}
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>수량</Label>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={base.quantity}
-                    onChange={(e) => setBase((f) => ({ ...f, quantity: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>단가 (원)</Label>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={base.unitPrice}
-                    onChange={(e) => setBase((f) => ({ ...f, unitPrice: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>금액 (자동계산)</Label>
-                  <Input
-                    readOnly
-                    className="bg-gray-50 font-semibold"
-                    value={materialsAutoAmount !== null ? formatCurrency(materialsAutoAmount) : ""}
-                  />
+
+                <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4">
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold text-gray-900">재료비 검수 이미지 업로드</p>
+                    <p className="text-xs text-gray-500">
+                      최신 저장 재료비 1건에 대해 검수확인서용 이미지를 업로드합니다.
+                    </p>
+                  </div>
+                  {!latestMaterialsExpense ? (
+                    <p className="text-xs text-gray-500">
+                      먼저 재료비 항목을 저장하면 여기에서 드래그앤드롭 또는 파일 선택으로 검수 이미지를 올릴 수 있습니다.
+                    </p>
+                  ) : (
+                    <div className="rounded-lg border border-amber-100 bg-white p-4">
+                      {(() => {
+                        const inspectionImage = latestMaterialsExpense.documents?.find(
+                          (doc) => doc.document_type === "inspection_photos"
+                        );
+                        const inspectionMessage = inspectionMessages[latestMaterialsExpense.id];
+                        const isInspectionBusy = inspectionUploadingId === latestMaterialsExpense.id;
+                        const isInspectionDrag = inspectionDragId === latestMaterialsExpense.id;
+
+                        return (
+                          <>
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <p className="text-sm font-semibold text-gray-800">{latestMaterialsExpense.title}</p>
+                                <p className="text-xs text-gray-500">
+                                  연결 비용집행 ID: {latestMaterialsExpense.id}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  검수확인서에 넣을 JPG, JPEG, PNG 이미지를 업로드하세요.
+                                </p>
+                              </div>
+                              {inspectionImage && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={isInspectionBusy}
+                                  onClick={() => handleInspectionImageDelete(latestMaterialsExpense.id, inspectionImage.id)}
+                                >
+                                  삭제
+                                </Button>
+                              )}
+                            </div>
+                            <div
+                              className={`mt-3 rounded-lg border-2 border-dashed px-4 py-4 text-sm transition ${
+                                isInspectionDrag ? "border-amber-500 bg-amber-50" : "border-gray-200 bg-white"
+                              }`}
+                              onDragOver={(event) => {
+                                event.preventDefault();
+                                setInspectionDragId(latestMaterialsExpense.id);
+                              }}
+                              onDragLeave={() => setInspectionDragId(null)}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                const file = event.dataTransfer.files?.[0];
+                                void handleInspectionImageUpload(latestMaterialsExpense.id, file);
+                              }}
+                            >
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                  <p className="font-medium text-gray-800">
+                                    파일을 드래그해서 놓거나 파일 선택으로 업로드하세요.
+                                  </p>
+                                  <p className="mt-1 text-xs text-gray-500">
+                                    현재 파일: {inspectionImage?.filename ?? "등록된 검수 이미지 없음"}
+                                  </p>
+                                  {inspectionMessage && (
+                                    <p
+                                      className={`mt-1 text-xs ${
+                                        inspectionMessage.type === "error"
+                                          ? "text-red-600"
+                                          : inspectionMessage.type === "success"
+                                            ? "text-green-700"
+                                            : "text-blue-600"
+                                      }`}
+                                    >
+                                      {inspectionMessage.text}
+                                    </p>
+                                  )}
+                                </div>
+                                <label className="inline-flex cursor-pointer items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                                  {isInspectionBusy ? "처리 중..." : "파일 선택"}
+                                  <input
+                                    type="file"
+                                    accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                                    className="hidden"
+                                    disabled={isInspectionBusy}
+                                    onChange={(event) => {
+                                      const file = event.target.files?.[0];
+                                      void handleInspectionImageUpload(latestMaterialsExpense.id, file);
+                                      event.currentTarget.value = "";
+                                    }}
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -840,44 +1012,55 @@ export default function ProjectExpensesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {(expenses ?? []).map((expense) => (
-                    <tr key={expense.id} className={`hover:bg-gray-50 ${editingExpense?.id === expense.id ? "bg-blue-50" : ""}`}>
-                      <td className="py-3 px-2">
-                        <span className="text-xs font-medium px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
-                          {CATEGORY_LABELS[expense.category_type]}
-                        </span>
-                      </td>
-                      <td className="py-3 px-2 font-medium text-gray-800">{expense.title}</td>
-                      <td className="py-3 px-2 text-gray-500 text-xs">{expense.vendor_name ?? "-"}</td>
-                      <td className="py-3 px-2 text-right text-gray-700 font-semibold">
-                        {formatCurrency(expense.amount)}
-                      </td>
-                      <td className="py-3 px-2">
-                        <Badge className={`text-xs ${EXPENSE_STATUS_COLORS[expense.status]}`}>
-                          {EXPENSE_STATUS_LABELS[expense.status]}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-2">
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => editingExpense?.id === expense.id ? setEditingExpense(null) : handleStartEdit(expense)}
-                            className="p-1 rounded hover:bg-blue-100 text-blue-600"
-                            title="수정"
-                          >
-                            {editingExpense?.id === expense.id ? <X className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
-                          </button>
-                          <button
-                            onClick={() => handleDelete(expense)}
-                            disabled={deleteMutation.isPending}
-                            className="p-1 rounded hover:bg-red-100 text-red-500"
-                            title="삭제"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {(expenses ?? []).map((expense) => {
+                    const inspectionImage = expense.documents?.find(
+                      (doc) => doc.document_type === "inspection_photos"
+                    );
+                    const inspectionMessage = inspectionMessages[expense.id];
+                    const isInspectionBusy = inspectionUploadingId === expense.id;
+                    const isInspectionDrag = inspectionDragId === expense.id;
+
+                    return (
+                      <Fragment key={expense.id}>
+                        <tr className={`hover:bg-gray-50 ${editingExpense?.id === expense.id ? "bg-blue-50" : ""}`}>
+                          <td className="py-3 px-2">
+                            <span className="text-xs font-medium px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
+                              {CATEGORY_LABELS[expense.category_type]}
+                            </span>
+                          </td>
+                          <td className="py-3 px-2 font-medium text-gray-800">{expense.title}</td>
+                          <td className="py-3 px-2 text-gray-500 text-xs">{expense.vendor_name ?? "-"}</td>
+                          <td className="py-3 px-2 text-right text-gray-700 font-semibold">
+                            {formatCurrency(expense.amount)}
+                          </td>
+                          <td className="py-3 px-2">
+                            <Badge className={`text-xs ${EXPENSE_STATUS_COLORS[expense.status]}`}>
+                              {EXPENSE_STATUS_LABELS[expense.status]}
+                            </Badge>
+                          </td>
+                          <td className="py-3 px-2">
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => editingExpense?.id === expense.id ? setEditingExpense(null) : handleStartEdit(expense)}
+                                className="p-1 rounded hover:bg-blue-100 text-blue-600"
+                                title="수정"
+                              >
+                                {editingExpense?.id === expense.id ? <X className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
+                              </button>
+                              <button
+                                onClick={() => handleDelete(expense)}
+                                disabled={deleteMutation.isPending}
+                                className="p-1 rounded hover:bg-red-100 text-red-500"
+                                title="삭제"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
 

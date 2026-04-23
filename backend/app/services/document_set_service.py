@@ -214,6 +214,9 @@ class DocumentSetService:
 
         required_docs = DOCUMENT_SETS.get(expense.category_type, [])
         base_context = self._build_context(expense, project, company_setting)
+        inspection_image_path = await self._resolve_inspection_image_path(expense, db)
+        if inspection_image_path:
+            base_context["inspection_image_path"] = inspection_image_path
 
         result = DocumentSetResult(
             expense_item_id=expense_id,
@@ -454,11 +457,46 @@ class DocumentSetService:
             compare_amount = int((original * COMPARATIVE_MULTIPLIER).quantize(Decimal("1")))
 
         context = dict(base_context)
+        quantity = Decimal(str(context.get("quantity") or 1))
+        compare_unit_price = compare_amount
+        if quantity not in (Decimal("0"), Decimal("0.0")):
+            try:
+                compare_unit_price = int((Decimal(str(compare_amount)) / quantity).quantize(Decimal("1")))
+            except Exception:
+                compare_unit_price = compare_amount
+
+        normalized_items: list[dict[str, Any]] = []
+        for raw_item in context.get("line_items") or []:
+            if not isinstance(raw_item, dict):
+                continue
+            item = dict(raw_item)
+            item["item_name"] = item.get("item_name") or context.get("item_name") or expense.title
+            item["quantity"] = item.get("quantity") or context.get("quantity") or 1
+            item["unit_price"] = compare_unit_price
+            item["amount"] = compare_amount
+            normalized_items.append(item)
+
+        if not normalized_items:
+            normalized_items = [{
+                "item_name": context.get("item_name") or context.get("product_name") or expense.title,
+                "spec": context.get("spec") or "",
+                "quantity": int(quantity) if quantity else 1,
+                "unit_price": compare_unit_price,
+                "amount": compare_amount,
+                "remark": context.get("remark") or "",
+            }]
+
+        context["line_items"] = normalized_items
+        context["item_name"] = normalized_items[0]["item_name"]
+        context["quantity"] = normalized_items[0]["quantity"]
+        context["unit_price"] = normalized_items[0]["unit_price"]
         context["amount"] = compare_amount
         context["total_amount"] = compare_amount
-        context["unit_price"] = compare_amount
-        context["vendor_name"] = compare_vendor.name
-        context["company_name"] = compare_vendor.name   # alias
+        context["vendor_name"] = base_context.get("our_company_name") or ""
+        context["company_name"] = compare_vendor.name
+        context["compare_vendor_name"] = compare_vendor.name
+        context["compare_vendor_registration"] = compare_vendor.business_number or ""
+        context["compare_vendor_contact"] = compare_vendor.contact or ""
         context["comparative_note"] = (
             f"비교견적 ({compare_vendor.name} · 원견적 {int(expense.amount):,}원 기준 10% 인상)"
         )
@@ -576,9 +614,10 @@ class DocumentSetService:
         company_setting: CompanySetting | None = None,
     ) -> dict[str, Any]:
         meta = expense.metadata_ or {}
+        vendor_name = expense.vendor_name or ""
         ctx: dict[str, Any] = {
             "expense_date":       expense.expense_date or "",
-            "vendor_name":        expense.vendor_name or "",
+            "vendor_name":        vendor_name,
             "vendor_registration":expense.vendor_registration_number or "",
             "amount":             int(expense.amount),
             "total_amount":       int(expense.amount),
@@ -625,8 +664,9 @@ class DocumentSetService:
         ctx.setdefault("budget_item_checkbox",  _make_budget_checkbox(expense.category_type))
         ctx.setdefault("item_name",             ctx.get("product_name") or expense.title)
         if company_setting:
+            manager_name = company_setting.default_manager_name or company_setting.representative_name or ""
             recipient_contact_parts = [
-                company_setting.default_manager_name,
+                manager_name,
                 company_setting.phone,
                 company_setting.email,
             ]
@@ -642,29 +682,82 @@ class DocumentSetService:
             ctx.setdefault("our_company_phone", company_setting.phone or "")
             ctx.setdefault("our_company_fax", company_setting.fax or "")
             ctx.setdefault("our_company_email", company_setting.email or "")
-            ctx.setdefault("our_company_manager_name", company_setting.default_manager_name or "")
+            ctx.setdefault("our_company_manager_name", manager_name)
 
-            ctx.setdefault("recipient_name", company_setting.company_name or "")
-            ctx.setdefault("recipient_registration_number", company_setting.company_registration_number or "")
-            ctx.setdefault("recipient_address", company_setting.address or "")
-            ctx.setdefault("recipient_business_type", company_setting.business_type or "")
-            ctx.setdefault("recipient_business_item", company_setting.business_item or "")
-            ctx.setdefault("recipient_representative", company_setting.representative_name or "")
-            ctx.setdefault("recipient_contact", recipient_contact)
+            # 회사 설정 값은 보존하되, 문서 출력에서는 vendor_name을 우선 수신처로 사용한다.
+            ctx.setdefault("recipient_name", vendor_name or company_setting.company_name or "")
+            ctx.setdefault("recipient_registration_number", expense.vendor_registration_number or "")
+            ctx.setdefault("recipient_address", "")
+            ctx.setdefault("recipient_business_type", "")
+            ctx.setdefault("recipient_business_item", "")
+            ctx.setdefault("recipient_representative", "")
+            ctx.setdefault("recipient_contact", "")
 
-            ctx.setdefault("buyer_name", company_setting.company_name or "")
-            ctx.setdefault("buyer_registration_number", company_setting.company_registration_number or "")
-            ctx.setdefault("buyer_address", company_setting.address or "")
-            ctx.setdefault("buyer_business_type", company_setting.business_type or "")
-            ctx.setdefault("buyer_business_item", company_setting.business_item or "")
-            ctx.setdefault("buyer_representative", company_setting.representative_name or "")
-            ctx.setdefault("buyer_contact", recipient_contact)
+            ctx.setdefault("buyer_name", vendor_name or "")
+            ctx.setdefault("buyer_registration_number", expense.vendor_registration_number or "")
+            ctx.setdefault("buyer_address", "")
+            ctx.setdefault("buyer_business_type", "")
+            ctx.setdefault("buyer_business_item", "")
+            ctx.setdefault("buyer_representative", "")
+            ctx.setdefault("buyer_contact", "")
 
             ctx.setdefault("company_business_registration_path", company_setting.company_business_registration_path or "")
             ctx.setdefault("company_bank_copy_path", company_setting.company_bank_copy_path or "")
             ctx.setdefault("company_quote_template_path", company_setting.company_quote_template_path or "")
             ctx.setdefault("company_transaction_statement_template_path", company_setting.company_transaction_statement_template_path or "")
+        inspection_images = sorted(
+            [
+                doc for doc in (expense.documents or [])
+                if doc.document_type == DocumentType.inspection_photos and doc.file_path
+            ],
+            key=lambda doc: doc.created_at,
+        )
+        if inspection_images:
+            ctx["inspection_image_path"] = inspection_images[-1].file_path
+        ctx.setdefault("recipient_display_name", f"{vendor_name} 귀하" if vendor_name else "")
         return ctx
+
+    async def _resolve_inspection_image_path(
+        self,
+        expense: ExpenseItem,
+        db: AsyncSession,
+    ) -> str | None:
+        own_images = sorted(
+            [
+                doc for doc in (expense.documents or [])
+                if doc.document_type == DocumentType.inspection_photos and doc.file_path
+            ],
+            key=lambda doc: doc.created_at,
+        )
+        if own_images:
+            return own_images[-1].file_path
+
+        if expense.category_type != CategoryType.materials:
+            return None
+
+        result = await db.execute(
+            select(ExpenseItem)
+            .where(
+                ExpenseItem.project_id == expense.project_id,
+                ExpenseItem.category_type == expense.category_type,
+                ExpenseItem.title == expense.title,
+                ExpenseItem.id != expense.id,
+            )
+            .options(selectinload(ExpenseItem.documents))
+            .order_by(ExpenseItem.created_at.desc())
+        )
+        related_expenses = result.scalars().all()
+        candidate_docs = []
+        for related in related_expenses:
+            for doc in related.documents or []:
+                if doc.document_type == DocumentType.inspection_photos and doc.file_path:
+                    candidate_docs.append(doc)
+
+        if not candidate_docs:
+            return None
+
+        candidate_docs.sort(key=lambda doc: doc.created_at)
+        return candidate_docs[-1].file_path
 
     def _project_data(self, project: Project) -> dict[str, Any]:
         return {

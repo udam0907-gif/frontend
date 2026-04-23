@@ -144,6 +144,12 @@ async def upload_document(
             detail=f"허용되지 않는 파일 형식입니다. 허용: {ALLOWED_DOCUMENT_EXTENSIONS}",
         )
 
+    if document_type == DocumentType.inspection_photos and Path(original_filename).suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="검수 이미지는 JPG, JPEG, PNG 형식만 업로드할 수 있습니다.",
+        )
+
     content = await file.read()
     if len(content) > 50 * 1024 * 1024:
         raise HTTPException(
@@ -155,6 +161,21 @@ async def upload_document(
     dest_dir.mkdir(parents=True, exist_ok=True)
     safe_name = generate_safe_filename(original_filename)
     file_path = str(dest_dir / safe_name)
+
+    if document_type == DocumentType.inspection_photos:
+        existing_docs = await db.execute(
+            select(ExpenseDocument).where(
+                ExpenseDocument.expense_item_id == expense_id,
+                ExpenseDocument.document_type == document_type,
+            )
+        )
+        for existing in existing_docs.scalars().all():
+            try:
+                Path(existing.file_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+            await db.delete(existing)
+
     Path(file_path).write_bytes(content)
 
     doc = ExpenseDocument(

@@ -66,6 +66,8 @@ interface FormState {
   file: File | null;
 }
 
+type UploadStage = "idle" | "selected" | "uploading" | "saved" | "error";
+
 const initialForm: FormState = {
   displayName: "",
   categoryType: "materials",
@@ -81,6 +83,9 @@ export default function ProjectTemplatesPage() {
 
   const [form, setForm] = useState<FormState>(initialForm);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
+  const [uploadStatusText, setUploadStatusText] = useState("파일을 드래그해서 놓거나 파일 선택으로 업로드할 템플릿을 고르세요.");
 
   const { data: templates, isLoading } = useQuery({
     queryKey: ["templates", projectId],
@@ -90,6 +95,8 @@ export default function ProjectTemplatesPage() {
   const uploadMutation = useMutation({
     mutationFn: () => {
       if (!form.file) throw new Error("파일을 선택하세요.");
+      setUploadStage("uploading");
+      setUploadStatusText("업로드/저장 중입니다.");
       return templatesApi.upload(
         form.categoryType,
         form.documentType,
@@ -100,11 +107,15 @@ export default function ProjectTemplatesPage() {
     },
     onSuccess: () => {
       setMessage({ type: "success", text: "템플릿이 등록되었습니다." });
+      setUploadStage("saved");
+      setUploadStatusText("저장 완료");
       setForm(initialForm);
       if (fileInputRef.current) fileInputRef.current.value = "";
       queryClient.invalidateQueries({ queryKey: ["templates", projectId] });
     },
     onError: (err: Error) => {
+      setUploadStage("error");
+      setUploadStatusText("저장에 실패했습니다.");
       setMessage({ type: "error", text: err.message });
     },
   });
@@ -125,7 +136,26 @@ export default function ProjectTemplatesPage() {
   const handleReset = () => {
     setForm(initialForm);
     setMessage(null);
+    setUploadStage("idle");
+    setUploadStatusText("파일을 드래그해서 놓거나 파일 선택으로 업로드할 템플릿을 고르세요.");
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleFileSelected = (file: File | null) => {
+    if (!file) {
+      setUploadStage("error");
+      setUploadStatusText("파일을 선택하세요.");
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      displayName: prev.displayName || file.name,
+      file,
+    }));
+    setMessage(null);
+    setUploadStage("selected");
+    setUploadStatusText("파일 선택됨");
   };
 
   return (
@@ -209,19 +239,83 @@ export default function ProjectTemplatesPage() {
 
             <div className="space-y-1.5">
               <Label htmlFor="file">파일 업로드 (DOCX / XLSX / PDF / JPG / PNG)</Label>
-              <input
-                ref={fileInputRef}
-                id="file"
-                type="file"
-                accept=".docx,.xlsx,.pdf,.jpg,.jpeg,.png"
-                className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm file:mr-3 file:border-0 file:bg-blue-50 file:text-blue-700 file:text-xs file:font-medium file:px-2 file:py-1 file:rounded"
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    file: e.target.files?.[0] ?? null,
-                  }))
-                }
-              />
+              <div
+                className={`rounded-lg border-2 border-dashed px-4 py-4 transition-colors ${
+                  dragActive ? "border-blue-500 bg-blue-50" : "border-gray-200 bg-gray-50"
+                }`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragActive(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  setDragActive(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragActive(false);
+                  handleFileSelected(e.dataTransfer.files?.[0] ?? null);
+                }}
+              >
+                <input
+                  ref={fileInputRef}
+                  id="file"
+                  type="file"
+                  accept=".docx,.xlsx,.pdf,.jpg,.jpeg,.png"
+                  className="hidden"
+                  onChange={(e) => {
+                    handleFileSelected(e.target.files?.[0] ?? null);
+                    e.currentTarget.value = "";
+                  }}
+                />
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-gray-800">
+                      파일을 드래그해서 놓거나 파일 선택으로 업로드하세요.
+                    </p>
+                    <p className="text-xs text-gray-500">DOCX / XLSX / PDF / JPG / PNG 업로드 가능</p>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                          uploadStage === "error"
+                            ? "bg-red-100 text-red-700"
+                            : uploadStage === "saved"
+                              ? "bg-green-100 text-green-700"
+                              : uploadStage === "uploading"
+                                ? "bg-sky-100 text-sky-700"
+                                : uploadStage === "selected"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : "bg-gray-200 text-gray-700"
+                        }`}
+                      >
+                        {uploadStage === "idle"
+                          ? "대기 중"
+                          : uploadStage === "selected"
+                            ? "파일 선택됨"
+                            : uploadStage === "uploading"
+                              ? "업로드/저장 중"
+                              : uploadStage === "saved"
+                                ? "저장 완료"
+                                : "실패"}
+                      </span>
+                      <span className="text-xs text-gray-600">{uploadStatusText}</span>
+                    </div>
+                    {form.file && (
+                      <p className="text-sm text-gray-700">
+                        현재 선택 파일: <span className="font-semibold">{form.file.name}</span>
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadMutation.isPending}
+                  >
+                    파일 선택
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
 

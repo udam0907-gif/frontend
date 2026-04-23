@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,12 +12,27 @@ from app.config import settings
 from app.core.logging import get_logger
 from app.database import get_db
 from app.models.company_setting import CompanySetting
-from app.schemas.company_setting import CompanySettingRead, CompanySettingUpsert
+from app.schemas.company_setting import (
+    CompanySettingExtractResponse,
+    CompanySettingExtractedFields,
+    CompanySettingFileStatus,
+    CompanySettingRead,
+    CompanySettingUpsert,
+)
+from app.services.company_setting_extractor import extract_company_setting_info
 
 router = APIRouter(tags=["company-settings"])
 logger = get_logger(__name__)
 
 _FILE_TYPE_MAP: dict[str, str] = {
+    "business_registration": "company_business_registration_path",
+    "bank_copy": "company_bank_copy_path",
+    "quote_template": "company_quote_template_path",
+    "transaction_statement_template": "company_transaction_statement_template_path",
+    "seal_image": "seal_image_path",
+}
+
+_STATUS_FIELD_MAP: dict[str, str] = {
     "business_registration": "company_business_registration_path",
     "bank_copy": "company_bank_copy_path",
     "quote_template": "company_quote_template_path",
@@ -36,6 +52,57 @@ _ALLOWED_EXTENSIONS: dict[str, set[str]] = {
 def _generate_safe_filename(filename: str) -> str:
     safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in filename)
     return safe or "file"
+
+
+def _resolve_storage_path(raw_path: str | None) -> Path | None:
+    if not raw_path:
+        return None
+    path = Path(raw_path)
+    if path.is_absolute():
+        return path
+    return Path("/app") / raw_path
+
+
+def _serialize_company_setting(company_setting: CompanySetting) -> CompanySettingRead:
+    file_statuses: dict[str, CompanySettingFileStatus] = {}
+
+    for file_type, field_name in _STATUS_FIELD_MAP.items():
+        raw_path = getattr(company_setting, field_name, None)
+        resolved_path = _resolve_storage_path(raw_path)
+        exists = bool(resolved_path and resolved_path.exists() and resolved_path.is_file())
+        updated_at = None
+        if exists and resolved_path is not None:
+            updated_at = datetime.fromtimestamp(resolved_path.stat().st_mtime)
+
+        file_statuses[file_type] = CompanySettingFileStatus(
+            path=raw_path,
+            exists=exists,
+            file_name=resolved_path.name if exists and resolved_path is not None else None,
+            updated_at=updated_at,
+        )
+
+    return CompanySettingRead(
+        id=company_setting.id,
+        company_id=company_setting.company_id,
+        company_name=company_setting.company_name,
+        company_registration_number=company_setting.company_registration_number,
+        representative_name=company_setting.representative_name,
+        address=company_setting.address,
+        business_type=company_setting.business_type,
+        business_item=company_setting.business_item,
+        phone=company_setting.phone,
+        fax=company_setting.fax,
+        email=company_setting.email,
+        default_manager_name=company_setting.default_manager_name,
+        seal_image_path=company_setting.seal_image_path,
+        company_business_registration_path=company_setting.company_business_registration_path,
+        company_bank_copy_path=company_setting.company_bank_copy_path,
+        company_quote_template_path=company_setting.company_quote_template_path,
+        company_transaction_statement_template_path=company_setting.company_transaction_statement_template_path,
+        file_statuses=file_statuses,
+        created_at=company_setting.created_at,
+        updated_at=company_setting.updated_at,
+    )
 
 
 async def _get_company_setting(company_id: str, db: AsyncSession) -> CompanySetting | None:
@@ -65,7 +132,7 @@ async def get_company_settings(
     company_setting = await _get_company_setting(company_id, db)
     if not company_setting:
         return CompanySettingRead(company_id=company_id)
-    return company_setting
+    return _serialize_company_setting(company_setting)
 
 
 @router.put("/", response_model=CompanySettingRead)
@@ -81,7 +148,7 @@ async def upsert_company_settings(
     await db.flush()
     await db.refresh(company_setting)
     logger.info("company_settings_upserted", company_id=payload.company_id)
-    return company_setting
+    return _serialize_company_setting(company_setting)
 
 
 @router.post("/files", response_model=CompanySettingRead)
@@ -119,4 +186,68 @@ async def upload_company_file(
     await db.refresh(company_setting)
 
     logger.info("company_file_uploaded", company_id=company_id, file_type=file_type, path=file_path)
-    return company_setting
+    return _serialize_company_setting(company_setting)
+
+
+@router.delete("/files", response_model=CompanySettingRead)
+async def delete_company_file(
+    company_id: str = Query("default"),
+    file_type: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+) -> CompanySettingRead:
+    if file_type not in _FILE_TYPE_MAP:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"지원하지 않는 파일 유형입니다: {file_type}",
+        )
+
+    company_setting = await _get_or_create_company_setting(company_id, db)
+    field_name = _FILE_TYPE_MAP[file_type]
+    raw_path = getattr(company_setting, field_name, None)
+    resolved_path = _resolve_storage_path(raw_path)
+
+    if resolved_path and resolved_path.exists() and resolved_path.is_file():
+        resolved_path.unlink()
+
+    setattr(company_setting, field_name, None)
+    await db.flush()
+    await db.refresh(company_setting)
+
+    logger.info("company_file_deleted", company_id=company_id, file_type=file_type, path=raw_path)
+    return _serialize_company_setting(company_setting)
+
+
+@router.post("/extract", response_model=CompanySettingExtractResponse)
+async def extract_company_settings_from_files(
+    company_id: str = "default",
+    file_type: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> CompanySettingExtractResponse:
+    company_setting = await _get_company_setting(company_id, db)
+    if not company_setting:
+        return CompanySettingExtractResponse(
+            company_id=company_id,
+            extracted=CompanySettingExtractedFields(),
+            source_by_field={},
+            used_files=[],
+        )
+
+    preferred_sources: tuple[str, ...] | None = None
+    if file_type:
+        if file_type not in _FILE_TYPE_MAP:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"지원하지 않는 파일 유형입니다: {file_type}",
+            )
+        preferred_sources = (file_type,)
+
+    result = extract_company_setting_info(
+        company_setting,
+        preferred_sources=preferred_sources,
+    )
+    return CompanySettingExtractResponse(
+        company_id=company_id,
+        extracted=CompanySettingExtractedFields(**result["extracted"]),
+        source_by_field=result["source_by_field"],
+        used_files=result["used_files"],
+    )

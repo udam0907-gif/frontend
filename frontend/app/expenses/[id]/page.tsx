@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Upload, CheckCircle2, XCircle, AlertTriangle, Download, FileText } from "lucide-react";
 import Link from "next/link";
 import { use } from "react";
+import { formatCurrency } from "@/lib/utils";
 
 export default function ExpenseDetailPage({
   params,
@@ -93,7 +94,7 @@ export default function ExpenseDetailPage({
             </Badge>
           </div>
           <p className="text-sm text-gray-500 mt-0.5">
-            {CATEGORY_LABELS[expense.category_type]} · {expense.amount.toLocaleString()}원
+            {CATEGORY_LABELS[expense.category_type]} · {formatCurrency(expense.amount)}
           </p>
         </div>
         <div className="flex gap-2">

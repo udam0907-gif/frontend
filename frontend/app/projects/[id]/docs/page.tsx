@@ -25,6 +25,7 @@ import {
   ImageIcon,
   Download,
 } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
 const COMPARATIVE_CATEGORIES = ["materials", "outsourcing"];
 
@@ -103,6 +104,9 @@ export default function ProjectDocsPage() {
   const queryClient = useQueryClient();
   const [freshResults, setFreshResults] = useState<Record<string, DocumentSetResponse>>({});
   const [compareSelections, setCompareSelections] = useState<Record<string, string>>({});
+  const [generateMessages, setGenerateMessages] = useState<
+    Record<string, { type: "info" | "success" | "error"; text: string }>
+  >({});
 
   const { data: expenses, isLoading } = useQuery({
     queryKey: ["expenses", id],
@@ -146,11 +150,72 @@ export default function ProjectDocsPage() {
 
   const generateMutation = useMutation({
     mutationFn: (expenseId: string) => documentSetsApi.generate(expenseId),
+    onMutate: (expenseId) => {
+      setGenerateMessages((prev) => ({
+        ...prev,
+        [expenseId]: {
+          type: "info",
+          text: "문서세트 생성을 시작합니다.",
+        },
+      }));
+    },
     onSuccess: (data, expenseId) => {
       setFreshResults((prev) => ({ ...prev, [expenseId]: data }));
       queryClient.invalidateQueries({ queryKey: ["latestSet", expenseId] });
+      setGenerateMessages((prev) => ({
+        ...prev,
+        [expenseId]: {
+          type: data.errors > 0 ? "error" : "success",
+          text:
+            data.errors > 0
+              ? `문서세트 생성이 일부 완료되었습니다. 완료 ${data.generated}건, 미완료 ${data.errors}건`
+              : `문서세트 생성이 완료되었습니다. 총 ${data.generated}건 생성됨`,
+        },
+      }));
+    },
+    onError: (error, expenseId) => {
+      const message =
+        error instanceof Error ? error.message : "문서세트 생성 중 오류가 발생했습니다.";
+      setGenerateMessages((prev) => ({
+        ...prev,
+        [expenseId]: {
+          type: "error",
+          text: message,
+        },
+      }));
     },
   });
+
+  const handleGenerate = (
+    expenseId: string,
+    needsComparative: boolean,
+    selectedCompareVendorId: string,
+    hasCompareQuoteFile: boolean,
+  ) => {
+    if (needsComparative && !selectedCompareVendorId) {
+      setGenerateMessages((prev) => ({
+        ...prev,
+        [expenseId]: {
+          type: "error",
+          text: "비교견적업체를 먼저 선택해 주세요.",
+        },
+      }));
+      return;
+    }
+
+    if (needsComparative && !hasCompareQuoteFile) {
+      setGenerateMessages((prev) => ({
+        ...prev,
+        [expenseId]: {
+          type: "error",
+          text: "선택한 비교견적업체에 견적서 파일이 없어 생성할 수 없습니다.",
+        },
+      }));
+      return;
+    }
+
+    generateMutation.mutate(expenseId);
+  };
 
   return (
     <div className="space-y-5">
@@ -198,7 +263,10 @@ export default function ProjectDocsPage() {
             const needsComparative = COMPARATIVE_CATEGORIES.includes(expense.category_type);
             const savedCompareVendorId = expense.input_data?.compare_vendor_id as string | undefined;
             const selectedCompareVendorId = compareSelections[expense.id] ?? savedCompareVendorId ?? "";
-            const compareVendorName = (vendors ?? []).find(v => v.id === selectedCompareVendorId)?.name;
+            const compareVendorObj = (vendors ?? []).find(v => v.id === selectedCompareVendorId);
+            const compareVendorName = compareVendorObj?.name;
+            const hasCompareQuoteFile = !!compareVendorObj?.quote_template_path;
+            const generateMessage = generateMessages[expense.id];
 
             return (
               <Card key={expense.id}>
@@ -215,12 +283,10 @@ export default function ProjectDocsPage() {
                       </div>
                       <p className="text-xs text-gray-400 mt-0.5">
                         {expense.vendor_name ?? "업체 미지정"} ·{" "}
-                        {Number(expense.amount).toLocaleString()}원
+                        {formatCurrency(expense.amount)}
                         {expense.expense_date && ` · ${expense.expense_date}`}
                       </p>
                       {needsComparative && (() => {
-                        const compareVendorObj = (vendors ?? []).find(v => v.id === selectedCompareVendorId);
-                        const hasQuoteFile = !!compareVendorObj?.quote_template_path;
                         return (
                           <div className="mt-1.5 space-y-0.5">
                             <div className="flex items-center gap-2">
@@ -228,7 +294,7 @@ export default function ProjectDocsPage() {
                               {selectedCompareVendorId ? (
                                 <>
                                   <span className="text-xs text-emerald-600 font-medium">{compareVendorName ?? selectedCompareVendorId}</span>
-                                  {hasQuoteFile
+                                  {hasCompareQuoteFile
                                     ? <span className="text-xs text-emerald-500">✓ 견적서 파일 있음</span>
                                     : <span className="text-xs text-red-500 font-semibold">⚠ 선택한 비교업체에 견적서 파일이 없습니다 (업체관리 → 견적서 업로드)</span>
                                   }
@@ -270,7 +336,14 @@ export default function ProjectDocsPage() {
                     <Button
                       size="sm"
                       disabled={isGenerating}
-                      onClick={() => generateMutation.mutate(expense.id)}
+                      onClick={() =>
+                        handleGenerate(
+                          expense.id,
+                          needsComparative,
+                          selectedCompareVendorId,
+                          hasCompareQuoteFile,
+                        )
+                      }
                       className="gap-1.5"
                     >
                       {isGenerating ? (
@@ -288,6 +361,21 @@ export default function ProjectDocsPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
+                  {generateMessage && (
+                    <div
+                      className={`mb-3 rounded-md border px-3 py-2 text-xs ${
+                        generateMessage.type === "success"
+                          ? "border-green-200 bg-green-50 text-green-700"
+                          : generateMessage.type === "error"
+                            ? "border-red-200 bg-red-50 text-red-700"
+                            : "border-blue-200 bg-blue-50 text-blue-700"
+                      }`}
+                    >
+                      {generateMessage.type === "info" && isGenerating
+                        ? "문서세트를 생성 중입니다..."
+                        : generateMessage.text}
+                    </div>
+                  )}
                   {result ? (
                     <div className="space-y-1.5">
                       <div className="flex gap-3 text-xs text-gray-400 pb-1.5 border-b mb-2">

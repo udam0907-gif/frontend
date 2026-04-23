@@ -17,6 +17,7 @@ import type {
   DocumentSetResponse,
   FieldRegistryItem,
   CompanySettings,
+  CompanySettingsExtractResponse,
   CompanySettingsUpdate,
   CompanySettingsUploadType,
 } from "./types";
@@ -31,8 +32,14 @@ export const apiClient = axios.create({
 apiClient.interceptors.response.use(
   (res) => res,
   (err: AxiosError) => {
-    const msg =
-      (err.response?.data as { message?: string })?.message ?? err.message;
+    const data = err.response?.data as { message?: string; detail?: string | { detail?: string } } | undefined;
+    const detail =
+      typeof data?.detail === "string"
+        ? data.detail
+        : typeof data?.detail === "object" && data.detail && "detail" in data.detail
+          ? data.detail.detail
+          : undefined;
+    const msg = data?.message ?? detail ?? err.message;
     return Promise.reject(new Error(msg));
   }
 );
@@ -319,4 +326,18 @@ export const companySettingsApi = {
       })
       .then((r) => r.data);
   },
+
+  deleteFile: (companyId: string, fileType: CompanySettingsUploadType) =>
+    apiClient
+      .delete<CompanySettings>("/company-settings/files", {
+        params: { company_id: companyId, file_type: fileType },
+      })
+      .then((r) => r.data),
+
+  extract: (companyId = "default", fileType?: CompanySettingsUploadType) =>
+    apiClient
+      .post<CompanySettingsExtractResponse>("/company-settings/extract", null, {
+        params: { company_id: companyId, file_type: fileType },
+      })
+      .then((r) => r.data),
 };

@@ -26,6 +26,7 @@ import {
   CalendarClock,
 } from "lucide-react";
 import Link from "next/link";
+import { formatCurrency } from "@/lib/utils";
 
 export default function ProjectDashboardPage() {
   const params = useParams();
@@ -106,7 +107,7 @@ export default function ProjectDashboardPage() {
               <Skeleton className="h-6 w-28" />
             ) : (
               <p className="text-lg font-bold text-gray-900">
-                {(project?.total_budget ?? 0).toLocaleString()}원
+                {formatCurrency(project?.total_budget ?? 0)}
               </p>
             )}
           </CardContent>
@@ -118,7 +119,7 @@ export default function ProjectDashboardPage() {
               <Skeleton className="h-6 w-28" />
             ) : (
               <p className="text-lg font-bold text-gray-900">
-                {totalSpent.toLocaleString()}원
+                {formatCurrency(totalSpent)}
               </p>
             )}
           </CardContent>
@@ -229,7 +230,7 @@ export default function ProjectDashboardPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm text-gray-600">
-                      {expense.amount.toLocaleString()}원
+                      {formatCurrency(expense.amount)}
                     </span>
                     <Badge
                       className={`text-xs ${EXPENSE_STATUS_COLORS[expense.status]}`}
@@ -267,8 +268,8 @@ export default function ProjectDashboardPage() {
                         {CATEGORY_LABELS[cat.category_type] ?? cat.category_type}
                       </span>
                       <span className="text-gray-500 text-xs">
-                        {cat.spent_amount.toLocaleString()} /{" "}
-                        {cat.allocated_amount.toLocaleString()}원 ({rate}%)
+                        {formatCurrency(cat.spent_amount)} /{" "}
+                        {formatCurrency(cat.allocated_amount)} ({rate}%)
                       </span>
                     </div>
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">

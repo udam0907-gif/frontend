@@ -391,6 +391,13 @@ export type CompanySettingsUploadType =
   | "transaction_statement_template"
   | "seal_image";
 
+export interface CompanySettingsFileStatus {
+  path: string | null;
+  exists: boolean;
+  file_name: string | null;
+  updated_at: string | null;
+}
+
 export interface CompanySettings {
   id: string | null;
   company_id: string;
@@ -409,6 +416,7 @@ export interface CompanySettings {
   company_bank_copy_path: string | null;
   company_quote_template_path: string | null;
   company_transaction_statement_template_path: string | null;
+  file_statuses: Record<CompanySettingsUploadType, CompanySettingsFileStatus>;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -430,4 +438,23 @@ export interface CompanySettingsUpdate {
   company_bank_copy_path?: string;
   company_quote_template_path?: string;
   company_transaction_statement_template_path?: string;
+}
+
+export interface CompanySettingsExtractedFields {
+  company_name?: string | null;
+  company_registration_number?: string | null;
+  representative_name?: string | null;
+  address?: string | null;
+  business_type?: string | null;
+  business_item?: string | null;
+  phone?: string | null;
+  fax?: string | null;
+  email?: string | null;
+}
+
+export interface CompanySettingsExtractResponse {
+  company_id: string;
+  extracted: CompanySettingsExtractedFields;
+  source_by_field: Record<string, string>;
+  used_files: string[];
 }

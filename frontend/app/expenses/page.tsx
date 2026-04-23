@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Info } from "lucide-react";
 import Link from "next/link";
+import { formatCurrency } from "@/lib/utils";
 
 export default function AllExpensesPage() {
   const [projectFilter, setProjectFilter] = useState("");
@@ -119,7 +120,7 @@ export default function AllExpensesPage() {
                   </div>
                   <div className="flex items-center gap-4">
                     <span className="text-sm font-bold text-gray-700">
-                      {expense.amount.toLocaleString()}원
+                      {formatCurrency(expense.amount)}
                     </span>
                     <Badge
                       className={`text-xs ${

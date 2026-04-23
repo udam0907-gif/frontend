@@ -23,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ReceiptText, Plus, Pencil, Trash2, X } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
 interface EditForm {
   title: string;
@@ -510,7 +511,7 @@ export default function ProjectExpensesPage() {
                   )}
                   {compareAmount !== null && (
                     <p className="text-xs text-blue-600 font-medium">
-                      비교견적 자동 금액: {compareAmount.toLocaleString()}원 (원금액 × 1.1)
+                      비교견적 자동 금액: {formatCurrency(compareAmount)} (원금액 × 1.1)
                     </p>
                   )}
                 </div>
@@ -684,7 +685,7 @@ export default function ProjectExpensesPage() {
                   <Input
                     readOnly
                     className="bg-gray-50 font-semibold"
-                    value={materialsAutoAmount !== null ? materialsAutoAmount.toLocaleString() + "원" : ""}
+                    value={materialsAutoAmount !== null ? formatCurrency(materialsAutoAmount) : ""}
                   />
                 </div>
               </div>
@@ -849,7 +850,7 @@ export default function ProjectExpensesPage() {
                       <td className="py-3 px-2 font-medium text-gray-800">{expense.title}</td>
                       <td className="py-3 px-2 text-gray-500 text-xs">{expense.vendor_name ?? "-"}</td>
                       <td className="py-3 px-2 text-right text-gray-700 font-semibold">
-                        {expense.amount.toLocaleString()}원
+                        {formatCurrency(expense.amount)}
                       </td>
                       <td className="py-3 px-2">
                         <Badge className={`text-xs ${EXPENSE_STATUS_COLORS[expense.status]}`}>
@@ -904,7 +905,7 @@ export default function ProjectExpensesPage() {
                           <Label className="text-xs">금액 (자동계산)</Label>
                           <Input readOnly className="bg-white" value={
                             editForm.quantity && editForm.unitPrice
-                              ? (Number(editForm.quantity) * Number(editForm.unitPrice)).toLocaleString() + "원"
+                              ? formatCurrency(Number(editForm.quantity) * Number(editForm.unitPrice))
                               : ""
                           } />
                         </div>
@@ -957,7 +958,7 @@ export default function ProjectExpensesPage() {
                             ? Number(editForm.quantity) * Number(editForm.unitPrice)
                             : Number(editForm.amount);
                           return baseAmt > 0 ? (
-                            <p className="text-xs text-blue-600">비교견적 금액: {Math.ceil(baseAmt * 1.1).toLocaleString()}원</p>
+                            <p className="text-xs text-blue-600">비교견적 금액: {formatCurrency(Math.ceil(baseAmt * 1.1))}</p>
                           ) : null;
                         })()}
                       </div>

@@ -76,6 +76,7 @@ class DocumentGenerator:
         template_id: str,
         layout_map: dict[str, Any] | None = None,
         document_type: str | None = None,
+        render_profile: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         파일 형식을 감지하고 적절한 렌더러로 처리한다.
@@ -136,6 +137,7 @@ class DocumentGenerator:
                     ctx,
                     expense_item_id,
                     template_id,
+                    render_profile=render_profile,
                 )
             return self._generate_docx_schema(
                 template_path, document_type, user_values, project_data, expense_item_id, template_id
@@ -343,6 +345,207 @@ class DocumentGenerator:
                     if needle in cell.text:
                         return table
         return None
+
+    # ─── 프로파일 기반 렌더러 ────────────────────────────────────────────────────
+
+    def _dispatch_by_render_profile(
+        self,
+        doc: Document,
+        ctx: dict[str, Any],
+        profile: dict[str, Any],
+    ) -> None:
+        strategy = profile.get("render_strategy", "marker_table")
+        if strategy == "paragraph_fill":
+            self._fill_by_paragraph_profile(doc, ctx, profile.get("paragraph_config") or {})
+        elif strategy == "standard_table":
+            self._fill_by_standard_table_profile(doc, ctx, profile.get("standard_table_config") or {})
+        elif strategy == "marker_table":
+            self._fill_by_marker_table_profile(doc, ctx, profile.get("marker_table_config") or {})
+        # docxtpl: _render_docx가 별도 처리하므로 여기선 noop
+
+    def _fill_by_paragraph_profile(
+        self,
+        doc: Document,
+        ctx: dict[str, Any],
+        config: dict[str, Any],
+    ) -> None:
+        """문단 인덱스 기반 채움 (paragraph_fill 전략)."""
+        paragraphs = doc.paragraphs
+        para_map: dict[str, int] = config.get("paragraph_map") or {}
+
+        for field_key, para_idx in para_map.items():
+            if not isinstance(para_idx, int) or para_idx >= len(paragraphs):
+                continue
+            value = ctx.get(field_key)
+            if value is not None:
+                paragraphs[para_idx].text = str(value)
+
+        line_items_start = config.get("line_items_para_start")
+        if line_items_start is None:
+            return
+        columns: list[str] = config.get("line_items_columns") or [
+            "item_name", "spec", "unit", "quantity", "unit_price", "amount", "remark"
+        ]
+        items: list[dict[str, Any]] = ctx.get("line_items") or []
+        for row_offset, item in enumerate(items):
+            for col_offset, col_key in enumerate(columns):
+                target_idx = line_items_start + row_offset * len(columns) + col_offset
+                if target_idx >= len(paragraphs):
+                    break
+                val: Any = item.get(col_key, "")
+                if col_key in ("unit_price", "amount"):
+                    val = self._format_doc_amount(val)
+                paragraphs[target_idx].text = str(val)
+
+    def _fill_by_standard_table_profile(
+        self,
+        doc: Document,
+        ctx: dict[str, Any],
+        config: dict[str, Any],
+    ) -> None:
+        """고정 테이블 좌표 기반 채움 (standard_table 전략)."""
+        h_idx = config.get("header_table_idx", 0)
+        b_idx = config.get("body_table_idx", 1)
+        if len(doc.tables) <= max(h_idx, b_idx):
+            return
+
+        header_table = doc.tables[h_idx]
+        body_table = doc.tables[b_idx]
+
+        recipient = str(ctx.get("recipient_display_name") or ctx.get("recipient_name") or "")
+        issue_date = str(ctx.get("issue_date") or "")
+        sender_manager = str(ctx.get("our_company_manager_name") or ctx.get("supplier_representative") or "")
+        sender_name = str(ctx.get("supplier_name") or "")
+        total_amount = self._format_doc_amount(ctx.get("total_amount") or ctx.get("amount") or 0)
+        items: list[dict[str, Any]] = ctx.get("line_items") or []
+
+        def _pos(cfg_key: str, default_row: int, default_col: int) -> tuple[int, int]:
+            p = config.get(cfg_key) or {}
+            return p.get("row", default_row), p.get("col", default_col)
+
+        rr, rc = _pos("recipient_pos", 0, 1)
+        dr, dc = _pos("date_pos", 0, 4)
+        smr, smc = _pos("sender_manager_pos", 1, 1)
+        snr, snc = _pos("sender_name_pos", 2, 1)
+
+        if rr < len(header_table.rows) and rc < len(header_table.rows[rr].cells):
+            self._set_cell_text(header_table.rows[rr].cells[rc], f"신 : {recipient}")
+        if dr < len(header_table.rows) and dc < len(header_table.rows[dr].cells):
+            self._set_cell_text(header_table.rows[dr].cells[dc], f"발 행 일 자: {issue_date}")
+        if smr < len(header_table.rows) and smc < len(header_table.rows[smr].cells):
+            self._set_cell_text(header_table.rows[smr].cells[smc], f"조 : {sender_manager}" if sender_manager else "조 :")
+        if snr < len(header_table.rows) and snc < len(header_table.rows[snr].cells):
+            self._set_cell_text(header_table.rows[snr].cells[snc], f"신 : {sender_name}")
+
+        if len(body_table.rows) > 0 and len(body_table.rows[0].cells) > 1:
+            self._set_cell_text(
+                body_table.rows[0].cells[1],
+                f"{recipient} 요청 견적 건" if recipient else "견적 요청 건",
+            )
+        if len(body_table.rows) > 1 and len(body_table.rows[1].cells) > 1:
+            self._set_cell_text(body_table.rows[1].cells[1], f"일금 {total_amount}원" if total_amount else "일금 0원")
+
+        li_start = config.get("line_items_start_row", 3)
+        li_end = config.get("line_items_end_row", 7)
+        li_cols: dict[str, int] = config.get("line_items_columns") or {
+            "seq": 0, "item_name": 1, "spec": 3, "unit_price": 4, "amount": 5
+        }
+
+        for row in body_table.rows[li_start:li_end]:
+            for cell in row.cells:
+                self._set_cell_text(cell, "")
+
+        for idx, (row, item) in enumerate(zip(body_table.rows[li_start:li_end], items), start=1):
+            cells = row.cells
+            for col_key, col_idx in li_cols.items():
+                if col_idx >= len(cells):
+                    continue
+                if col_key == "seq":
+                    self._set_cell_text(cells[col_idx], str(idx))
+                elif col_key in ("unit_price", "amount"):
+                    self._set_cell_text(cells[col_idx], self._format_doc_amount(item.get(col_key, "")))
+                else:
+                    self._set_cell_text(cells[col_idx], str(item.get(col_key, "")))
+
+        subtotal_pos = config.get("subtotal_pos")
+        if subtotal_pos:
+            sr, sc = subtotal_pos.get("row", 7), subtotal_pos.get("col", 5)
+            if sr < len(body_table.rows) and sc < len(body_table.rows[sr].cells):
+                self._set_cell_text(body_table.rows[sr].cells[sc], total_amount or "0")
+
+        total_pos = config.get("total_pos")
+        if total_pos:
+            tr, tc = total_pos.get("row", 9), total_pos.get("col", 5)
+            if tr < len(body_table.rows) and tc < len(body_table.rows[tr].cells):
+                self._set_cell_text(body_table.rows[tr].cells[tc], f"₩{total_amount}" if total_amount else "₩0")
+
+        contact_pos = config.get("contact_pos")
+        if contact_pos:
+            cr, cc = contact_pos.get("row", 11), contact_pos.get("col", 1)
+            sender_phone = str(ctx.get("supplier_phone") or "")
+            if cr < len(body_table.rows) and cc < len(body_table.rows[cr].cells):
+                self._set_cell_text(body_table.rows[cr].cells[cc], f"{sender_manager} / {sender_phone}".strip(" /"))
+
+        email_pos = config.get("company_email_pos")
+        if email_pos:
+            er, ec = email_pos.get("row", 12), email_pos.get("col", 1)
+            sender_email = str(ctx.get("supplier_email") or "")
+            if er < len(body_table.rows) and ec < len(body_table.rows[er].cells):
+                self._set_cell_text(body_table.rows[er].cells[ec], f"{sender_name} / {sender_email}".strip(" /"))
+
+    def _fill_by_marker_table_profile(
+        self,
+        doc: Document,
+        ctx: dict[str, Any],
+        config: dict[str, Any],
+    ) -> None:
+        """마커 텍스트 기반 채움 (marker_table 전략)."""
+        issue_date = str(ctx.get("issue_date") or "")
+        total_amount = self._format_doc_amount(ctx.get("total_amount") or ctx.get("amount") or 0)
+        subtotal = self._format_doc_amount(ctx.get("subtotal") or ctx.get("total_amount") or ctx.get("amount") or 0)
+        vat = self._format_doc_amount(ctx.get("vat") or 0)
+        items: list[dict[str, Any]] = ctx.get("line_items") or []
+
+        date_marker = config.get("date_marker", "작성일자")
+        amount_marker = config.get("amount_marker", "합계금액")
+        line_marker = config.get("line_items_marker", "품목")
+        subtotal_offset = config.get("subtotal_row_offset", 28)
+        vat_offset = config.get("vat_row_offset", 29)
+        total_offset = config.get("total_row_offset", 30)
+        total_col = config.get("total_col", 5)
+
+        issue_table = self._find_first_table_with_text(doc, date_marker)
+        if issue_table is not None and issue_table.rows and len(issue_table.rows[0].cells) > 1:
+            self._set_cell_text(issue_table.rows[0].cells[1], issue_date)
+
+        amount_table = self._find_first_table_with_text(doc, amount_marker)
+        if amount_table is not None and amount_table.rows and len(amount_table.rows[0].cells) >= 4:
+            self._set_cell_text(amount_table.rows[0].cells[1], total_amount)
+            self._set_cell_text(amount_table.rows[0].cells[3], f"₩ {total_amount}" if total_amount else "")
+
+        line_table = self._find_first_table_with_text(doc, line_marker)
+        if line_table is None:
+            return
+
+        for row in line_table.rows[1:subtotal_offset]:
+            for idx, cell in enumerate(row.cells[1:], start=1):
+                self._set_cell_text(cell, "-" if idx == total_col else "")
+
+        for row, item in zip(line_table.rows[1:subtotal_offset], items):
+            self._set_cell_text(row.cells[1], item.get("item_name", ""))
+            self._set_cell_text(row.cells[2], item.get("spec", ""))
+            self._set_cell_text(row.cells[3], item.get("quantity", ""))
+            self._set_cell_text(row.cells[4], self._format_doc_amount(item.get("unit_price", "")))
+            if len(row.cells) > total_col:
+                self._set_cell_text(row.cells[total_col], self._format_doc_amount(item.get("amount", "")))
+            if len(row.cells) > total_col + 1:
+                self._set_cell_text(row.cells[total_col + 1], item.get("remark", ""))
+
+        if len(line_table.rows) > total_offset:
+            self._set_cell_text(line_table.rows[subtotal_offset].cells[total_col], subtotal)
+            self._set_cell_text(line_table.rows[vat_offset].cells[total_col], vat)
+            self._set_cell_text(line_table.rows[total_offset].cells[total_col - 1], f"₩ {total_amount}" if total_amount else "")
+            self._set_cell_text(line_table.rows[total_offset].cells[total_col], f"₩ {total_amount}" if total_amount else "")
 
     def _fill_quote_like_table(self, doc: Document, ctx: dict[str, Any], issue_date_required: bool) -> None:
         issue_date = str(ctx.get("issue_date") or "")
@@ -669,12 +872,49 @@ class DocumentGenerator:
         context: dict[str, Any],
         expense_item_id: str,
         template_id: str,
+        render_profile: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # ── docxtpl 전략: Document 직접 조작 없이 docxtpl 렌더러로 위임 ──────
+        if render_profile and render_profile.get("render_strategy") == "docxtpl":
+            # subtotal/vat 기본값 보장 (docxtpl 템플릿이 해당 변수를 쓸 경우)
+            context.setdefault("subtotal", context.get("total_amount", ""))
+            context.setdefault("vat", 0)
+            output_path = self._render_docx(template_path, context, expense_item_id)
+            trace = {
+                "template_path": template_path,
+                "template_id": template_id,
+                "document_type": document_type,
+                "renderer": "profile_docxtpl",
+                "render_mode": "docx_rendered",
+                "fields_filled": list(context.keys()),
+                "line_items_count": len(context.get("line_items", [])),
+            }
+            return {"output_path": output_path, "render_mode": "docx_rendered", "generation_trace": trace}
+
         output_filename = f"{expense_item_id}_{uuid.uuid4().hex[:8]}.docx"
         output_path = str(self._output_base / output_filename)
         shutil.copy2(template_path, output_path)
 
         doc = Document(output_path)
+
+        # 프로파일 기반 디스패치 — quote/comparative_quote (marker/paragraph/table 전략)
+        if render_profile and document_type in {"quote", "comparative_quote"}:
+            self._dispatch_by_render_profile(doc, context, render_profile)
+            doc.save(output_path)
+            if render_profile.get("textbox_replacement", True):
+                self._replace_textbox_and_text_runs(output_path, context, document_type)
+            trace = {
+                "template_path": template_path,
+                "template_id": template_id,
+                "document_type": document_type,
+                "renderer": f"profile_{render_profile.get('render_strategy', 'unknown')}",
+                "render_mode": "docx_rendered",
+                "fields_filled": ["supplier_name", "recipient_name", "issue_date", "line_items", "total_amount"],
+                "line_items_count": len(context.get("line_items", [])),
+            }
+            return {"output_path": output_path, "render_mode": "docx_rendered", "generation_trace": trace}
+
+        # 기존 자동감지 fallback (render_profile 없을 때)
         first_table_text = ""
         if doc.tables and doc.tables[0].rows and doc.tables[0].rows[0].cells:
             first_table_text = " ".join(cell.text for cell in doc.tables[0].rows[0].cells)

@@ -108,6 +108,21 @@ export const templatesApi = {
     apiClient
       .put<Template>(`/templates/${id}/cell-mapping`, { mapping })
       .then((r) => r.data),
+
+  getRenderProfile: (id: string) =>
+    apiClient
+      .get<{ template_id: string; document_type: string; render_profile: Record<string, unknown> | null; strategy_examples: Record<string, unknown> }>(`/templates/${id}/render-profile`)
+      .then((r) => r.data),
+
+  setRenderProfile: (id: string, profile: Record<string, unknown>) =>
+    apiClient
+      .put<Template>(`/templates/${id}/render-profile`, profile)
+      .then((r) => r.data),
+
+  clearRenderProfile: (id: string) =>
+    apiClient
+      .delete<Template>(`/templates/${id}/render-profile`)
+      .then((r) => r.data),
 };
 
 // ─── Expenses ────────────────────────────────────────────────────────────────

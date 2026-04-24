@@ -31,8 +31,11 @@ class Template(Base, TimestampMixin):
     # field_map: 기존 flat 구조 — 렌더링 엔진이 현재 사용
     #   {"field_key": {"label": "...", "type": "...", "cell": "B4", ...}}
     layout_map: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
-    # layout_map: 확장 구조 명세 — 미래 렌더러·검증 엔진용 (현재 렌더러는 미사용)
+    # layout_map: XLSX 구조 명세 — layout_map 렌더러 전용
     #   {"document_type": "...", "scalar_fields": {...}, "checkbox_fields": {...}, "table_fields": {...}}
+    render_profile: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    # render_profile: DOCX 렌더 전략 프로파일 — 견적서 등 회사별 양식 대응
+    #   {"doc_type": "quote", "render_strategy": "marker_table|paragraph_fill|standard_table|docxtpl", ...}
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     project_id: Mapped[uuid.UUID | None] = mapped_column(

@@ -317,6 +317,7 @@ class DocumentSetService:
             is_vendor_doc=False,
             db_template_id=template.id,
             batch_id=batch_id,
+            render_profile=template.render_profile,
         )
 
     # ─── 업체 바이너리 복사 ──────────────────────────────────────────────────
@@ -397,7 +398,7 @@ class DocumentSetService:
                 error_message=f"업체 원본 양식 미등록: {attr}",
                 is_vendor_doc=True,
             )
-        # 같은 document_type의 DB 템플릿 field_map을 vendor 파일에 적용
+        # 같은 document_type의 DB 템플릿 field_map / render_profile 을 vendor 파일에 적용
         db_template = await self._find_template(
             category_type=expense.category_type,
             document_type=doc_type,
@@ -405,6 +406,7 @@ class DocumentSetService:
             db=db,
         )
         field_map = db_template.field_map if db_template else {}
+        render_profile = db_template.render_profile if db_template else None
 
         return await self._render_from_template(
             doc_type=doc_type,
@@ -418,6 +420,7 @@ class DocumentSetService:
             db=db,
             is_vendor_doc=True,
             batch_id=batch_id,
+            render_profile=render_profile,
         )
 
     # ─── 비교견적서 ─────────────────────────────────────────────────────────
@@ -501,7 +504,7 @@ class DocumentSetService:
             f"비교견적 ({compare_vendor.name} · 원견적 {int(expense.amount):,}원 기준 10% 인상)"
         )
 
-        # quote 문서 유형의 DB field_map을 비교견적서에도 적용
+        # quote 문서 유형의 DB field_map / render_profile 을 비교견적서에도 적용
         db_template = await self._find_template(
             category_type=expense.category_type,
             document_type=DocumentType.quote,
@@ -509,6 +512,7 @@ class DocumentSetService:
             db=db,
         )
         field_map = db_template.field_map if db_template else {}
+        render_profile = db_template.render_profile if db_template else None
 
         return await self._render_from_template(
             doc_type=COMPARATIVE_DOC,
@@ -522,6 +526,7 @@ class DocumentSetService:
             db=db,
             is_vendor_doc=True,
             batch_id=batch_id,
+            render_profile=render_profile,
         )
 
     # ─── 공통 렌더 호출 ─────────────────────────────────────────────────────
@@ -540,6 +545,7 @@ class DocumentSetService:
         is_vendor_doc: bool,
         db_template_id: uuid.UUID | None = None,
         batch_id: str = "",
+        render_profile: dict[str, Any] | None = None,
     ) -> DocSetItem:
         try:
             gen_result = await generator.generate(
@@ -550,6 +556,7 @@ class DocumentSetService:
                 expense_item_id=str(expense.id),
                 template_id=template_id,
                 document_type=doc_type.value,
+                render_profile=render_profile,
             )
 
             render_mode = gen_result.get("render_mode", "")

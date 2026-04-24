@@ -46,6 +46,7 @@ class TemplateRead(BaseModel):
     version: str
     field_map: dict[str, Any]
     layout_map: dict[str, Any] | None = None
+    render_profile: dict[str, Any] | None = None
     is_active: bool
     description: str | None
     project_id: uuid.UUID | None = None

@@ -13,6 +13,7 @@ from app.models.document import GeneratedDocument
 from app.models.enums import CategoryType, DocumentType
 from app.models.template import Template
 from app.schemas.layout_map import LAYOUT_DRAFTS, LayoutMap
+from app.schemas.render_profile import RenderProfile, STRATEGY_EXAMPLES
 from app.schemas.template import TemplateRead, TemplateUpdate
 from app.services.template_service import TemplateService
 
@@ -235,6 +236,54 @@ async def set_cell_mapping(
         template_id=str(template_id),
         fields=list(payload.mapping.keys()),
     )
+    return template
+
+
+@router.get("/{template_id}/render-profile")
+async def get_render_profile(
+    template_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """저장된 render_profile 조회. 없으면 null 반환."""
+    template = await _get_or_404(template_id, db)
+    return {
+        "template_id": str(template_id),
+        "document_type": template.document_type.value,
+        "render_profile": template.render_profile,
+        "strategy_examples": STRATEGY_EXAMPLES,
+    }
+
+
+@router.put("/{template_id}/render-profile", response_model=TemplateRead)
+async def set_render_profile(
+    template_id: uuid.UUID,
+    payload: RenderProfile,
+    db: AsyncSession = Depends(get_db),
+) -> Template:
+    """render_profile 저장. 기존 field_map / layout_map 은 변경하지 않는다."""
+    template = await _get_or_404(template_id, db)
+    template.render_profile = payload.to_dict()
+    await db.flush()
+    await db.refresh(template)
+    logger.info(
+        "render_profile_saved",
+        template_id=str(template_id),
+        doc_type=payload.doc_type,
+        render_strategy=payload.render_strategy,
+    )
+    return template
+
+
+@router.delete("/{template_id}/render-profile", response_model=TemplateRead)
+async def clear_render_profile(
+    template_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> Template:
+    """render_profile 초기화 (자동감지 fallback으로 되돌림)."""
+    template = await _get_or_404(template_id, db)
+    template.render_profile = None
+    await db.flush()
+    await db.refresh(template)
     return template
 
 

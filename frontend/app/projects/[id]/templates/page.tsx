@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import React, { useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { templatesApi } from "@/lib/api";
@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Upload, Trash2, FileText } from "lucide-react";
+import { Upload, Trash2, FileText, Settings, ChevronDown, ChevronUp } from "lucide-react";
 
 const CATEGORY_OPTIONS: { value: CategoryType; label: string }[] = [
   { value: "materials", label: "재료비" },
@@ -68,6 +68,45 @@ interface FormState {
 
 type UploadStage = "idle" | "selected" | "uploading" | "saved" | "error";
 
+const RENDER_STRATEGIES = [
+  { value: "marker_table", label: "마커 테이블 (기본값 — 텍스트 마커로 테이블 탐색)" },
+  { value: "standard_table", label: "고정 테이블 (수신:/발행일자: 구조 양식)" },
+  { value: "paragraph_fill", label: "문단 채움 (표 없는 텍스트 구조 양식)" },
+  { value: "docxtpl", label: "docxtpl ({{variable}} 플레이스홀더 양식)" },
+];
+
+const STRATEGY_DEFAULT_CONFIG: Record<string, Record<string, unknown>> = {
+  marker_table: {
+    date_marker: "작성일자",
+    amount_marker: "합계금액",
+    line_items_marker: "품목",
+    subtotal_row_offset: 28,
+    vat_row_offset: 29,
+    total_row_offset: 30,
+    total_col: 5,
+  },
+  standard_table: {
+    header_table_idx: 0,
+    body_table_idx: 1,
+    recipient_pos: { row: 0, col: 1 },
+    date_pos: { row: 0, col: 4 },
+    sender_manager_pos: { row: 1, col: 1 },
+    sender_name_pos: { row: 2, col: 1 },
+    line_items_start_row: 3,
+    line_items_end_row: 7,
+    line_items_columns: { seq: 0, item_name: 1, spec: 3, unit_price: 4, amount: 5 },
+  },
+  paragraph_fill: {
+    paragraph_map: {
+      issue_date: 7,
+      recipient_name: 12,
+      supplier_name: 13,
+    },
+    line_items_para_start: 30,
+  },
+  docxtpl: {},
+};
+
 const initialForm: FormState = {
   displayName: "",
   categoryType: "materials",
@@ -86,6 +125,13 @@ export default function ProjectTemplatesPage() {
   const [dragActive, setDragActive] = useState(false);
   const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
   const [uploadStatusText, setUploadStatusText] = useState("파일을 드래그해서 놓거나 파일 선택으로 업로드할 템플릿을 고르세요.");
+
+  // 렌더 프로파일 편집 상태
+  const [profileEditingId, setProfileEditingId] = useState<string | null>(null);
+  const [profileStrategy, setProfileStrategy] = useState("marker_table");
+  const [profileTextboxReplacement, setProfileTextboxReplacement] = useState(true);
+  const [profileConfigJson, setProfileConfigJson] = useState("");
+  const [profileMessage, setProfileMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const { data: templates, isLoading } = useQuery({
     queryKey: ["templates", projectId],
@@ -126,6 +172,63 @@ export default function ProjectTemplatesPage() {
       queryClient.invalidateQueries({ queryKey: ["templates", projectId] });
     },
   });
+
+  const renderProfileMutation = useMutation({
+    mutationFn: ({ id, profile }: { id: string; profile: Record<string, unknown> }) =>
+      templatesApi.setRenderProfile(id, profile),
+    onSuccess: () => {
+      setProfileMessage({ type: "success", text: "렌더 프로파일이 저장되었습니다." });
+      queryClient.invalidateQueries({ queryKey: ["templates", projectId] });
+    },
+    onError: (err: Error) => {
+      setProfileMessage({ type: "error", text: `저장 실패: ${err.message}` });
+    },
+  });
+
+  const clearProfileMutation = useMutation({
+    mutationFn: (id: string) => templatesApi.clearRenderProfile(id),
+    onSuccess: () => {
+      setProfileMessage({ type: "success", text: "프로파일이 초기화되었습니다. (자동감지 방식으로 복원)" });
+      queryClient.invalidateQueries({ queryKey: ["templates", projectId] });
+    },
+  });
+
+  const openProfileEditor = (tpl: { id: string; document_type?: string }) => {
+    setProfileEditingId(tpl.id);
+    setProfileStrategy("marker_table");
+    setProfileTextboxReplacement(true);
+    setProfileConfigJson(JSON.stringify(STRATEGY_DEFAULT_CONFIG["marker_table"], null, 2));
+    setProfileMessage(null);
+  };
+
+  const handleStrategyChange = (strategy: string) => {
+    setProfileStrategy(strategy);
+    const defaultCfg = STRATEGY_DEFAULT_CONFIG[strategy] || {};
+    setProfileConfigJson(JSON.stringify(defaultCfg, null, 2));
+  };
+
+  const handleSaveProfile = () => {
+    if (!profileEditingId) return;
+    let strategyConfig: Record<string, unknown> = {};
+    try {
+      strategyConfig = JSON.parse(profileConfigJson);
+    } catch {
+      setProfileMessage({ type: "error", text: "전략 설정 JSON 형식 오류입니다." });
+      return;
+    }
+    const configKey =
+      profileStrategy === "paragraph_fill" ? "paragraph_config" :
+      profileStrategy === "standard_table" ? "standard_table_config" :
+      profileStrategy === "marker_table" ? "marker_table_config" : null;
+
+    const profile: Record<string, unknown> = {
+      doc_type: "quote",
+      render_strategy: profileStrategy,
+      textbox_replacement: profileTextboxReplacement,
+      ...(configKey ? { [configKey]: strategyConfig } : {}),
+    };
+    renderProfileMutation.mutate({ id: profileEditingId, profile });
+  };
 
   // 비목 변경 시 문서 종류 초기값 업데이트
   const handleCategoryChange = (cat: CategoryType) => {
@@ -374,41 +477,165 @@ export default function ProjectTemplatesPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {(templates ?? []).map((tpl) => (
-                    <tr key={tpl.id} className="hover:bg-gray-50">
-                      <td className="py-3 px-2 font-medium text-gray-800">
-                        {tpl.name}
-                      </td>
-                      <td className="py-3 px-2 text-gray-600">
-                        {CATEGORY_LABELS[tpl.category_type] ?? tpl.category_type}
-                      </td>
-                      <td className="py-3 px-2 text-gray-500 text-xs">
-                        {tpl.filename}
-                      </td>
-                      <td className="py-3 px-2">
-                        <Badge
-                          className={
-                            tpl.is_active
-                              ? "bg-green-100 text-green-700 text-xs"
-                              : "bg-gray-100 text-gray-500 text-xs"
-                          }
-                        >
-                          {tpl.is_active ? "활성" : "비활성"}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-2">
-                        {tpl.is_active && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2"
-                            onClick={() => deactivateMutation.mutate(tpl.id)}
-                            disabled={deactivateMutation.isPending}
+                    <React.Fragment key={tpl.id}>
+                      <tr className="hover:bg-gray-50">
+                        <td className="py-3 px-2 font-medium text-gray-800">
+                          {tpl.name}
+                        </td>
+                        <td className="py-3 px-2 text-gray-600">
+                          {CATEGORY_LABELS[tpl.category_type] ?? tpl.category_type}
+                        </td>
+                        <td className="py-3 px-2 text-gray-500 text-xs">
+                          {tpl.filename}
+                        </td>
+                        <td className="py-3 px-2">
+                          <Badge
+                            className={
+                              tpl.is_active
+                                ? "bg-green-100 text-green-700 text-xs"
+                                : "bg-gray-100 text-gray-500 text-xs"
+                            }
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
+                            {tpl.is_active ? "활성" : "비활성"}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-2">
+                          <div className="flex items-center gap-1">
+                            {tpl.is_active && ["quote", "comparative_quote"].includes(tpl.document_type) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-blue-600 hover:text-blue-800 hover:bg-blue-50 h-7 px-2 text-xs"
+                                onClick={() =>
+                                  profileEditingId === tpl.id
+                                    ? setProfileEditingId(null)
+                                    : openProfileEditor(tpl)
+                                }
+                              >
+                                <Settings className="w-3.5 h-3.5 mr-1" />
+                                프로파일
+                                {profileEditingId === tpl.id
+                                  ? <ChevronUp className="w-3 h-3 ml-1" />
+                                  : <ChevronDown className="w-3 h-3 ml-1" />}
+                              </Button>
+                            )}
+                            {tpl.is_active && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 px-2"
+                                onClick={() => deactivateMutation.mutate(tpl.id)}
+                                disabled={deactivateMutation.isPending}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+
+                      {profileEditingId === tpl.id && (
+                        <tr key={`${tpl.id}-profile`}>
+                          <td colSpan={5} className="bg-blue-50 px-4 py-4 border-b border-blue-100">
+                            <div className="space-y-3">
+                              <p className="text-xs font-semibold text-blue-700 flex items-center gap-1">
+                                <Settings className="w-3.5 h-3.5" />
+                                렌더 프로파일 설정 —{" "}
+                                <span className="font-normal">{tpl.name}</span>
+                              </p>
+
+                              {profileMessage && (
+                                <div
+                                  className={`text-xs px-3 py-2 rounded ${
+                                    profileMessage.type === "success"
+                                      ? "bg-green-100 text-green-700"
+                                      : "bg-red-100 text-red-700"
+                                  }`}
+                                >
+                                  {profileMessage.text}
+                                </div>
+                              )}
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <label className="text-xs font-medium text-gray-700">렌더 전략</label>
+                                  <select
+                                    className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs bg-white"
+                                    value={profileStrategy}
+                                    onChange={(e) => handleStrategyChange(e.target.value)}
+                                  >
+                                    {RENDER_STRATEGIES.map((s) => (
+                                      <option key={s.value} value={s.value}>
+                                        {s.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                <div className="flex items-center gap-2 pt-5">
+                                  <input
+                                    type="checkbox"
+                                    id="textbox-replacement"
+                                    checked={profileTextboxReplacement}
+                                    onChange={(e) => setProfileTextboxReplacement(e.target.checked)}
+                                    className="w-4 h-4"
+                                  />
+                                  <label htmlFor="textbox-replacement" className="text-xs text-gray-700">
+                                    텍스트박스 XML 치환 (귀하 / 작성일자 / 공급자블록)
+                                  </label>
+                                </div>
+                              </div>
+
+                              {profileStrategy !== "docxtpl" && (
+                                <div className="space-y-1">
+                                  <label className="text-xs font-medium text-gray-700">
+                                    전략 설정 (JSON)
+                                    <span className="ml-2 font-normal text-gray-400">
+                                      — 전략 변경 시 기본값으로 초기화
+                                    </span>
+                                  </label>
+                                  <textarea
+                                    className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono bg-white resize-y"
+                                    rows={10}
+                                    value={profileConfigJson}
+                                    onChange={(e) => setProfileConfigJson(e.target.value)}
+                                    spellCheck={false}
+                                  />
+                                </div>
+                              )}
+
+                              <div className="flex gap-2 pt-1">
+                                <Button
+                                  size="sm"
+                                  onClick={handleSaveProfile}
+                                  disabled={renderProfileMutation.isPending}
+                                  className="text-xs h-7"
+                                >
+                                  {renderProfileMutation.isPending ? "저장 중..." : "프로파일 저장"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => clearProfileMutation.mutate(tpl.id)}
+                                  disabled={clearProfileMutation.isPending}
+                                  className="text-xs h-7 text-gray-600"
+                                >
+                                  초기화 (자동감지)
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setProfileEditingId(null)}
+                                  className="text-xs h-7"
+                                >
+                                  닫기
+                                </Button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

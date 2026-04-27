@@ -61,6 +61,9 @@ export const projectsApi = {
   update: (id: string, data: Partial<Pick<ProjectCreate, "name" | "institution" | "principal_investigator" | "period_start" | "period_end" | "total_budget" | "status"> & { metadata?: Record<string, unknown> }>) =>
     apiClient.patch<Project>(`/projects/${id}`, data).then((r) => r.data),
 
+  updateMetadata: (id: string, metadata: Record<string, unknown>) =>
+    apiClient.patch<{ status: string }>(`/projects/${id}/metadata`, metadata).then((r) => r.data),
+
   uploadFile: (id: string, type: "agreement" | "plan", file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -77,6 +80,7 @@ export const projectsApi = {
     return apiClient
       .post<ExtractedProjectData>(`/projects/extract-pdf?doc_type=${docType}`, form, {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
       })
       .then((r) => r.data);
   },

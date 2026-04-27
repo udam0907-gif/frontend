@@ -221,9 +221,12 @@ async def _extract_with_llm(
     doc_type_hint: str,
 ) -> ExtractedProjectData | None:
     """Claude API로 PDF에서 정보를 추출한다."""
-    from app.services.llm_service import get_llm_service
-
-    llm = get_llm_service()
+    try:
+        from app.services.llm_service import get_llm_service
+        llm = get_llm_service()
+    except Exception as e:
+        logger.error("llm_service_init_error", error=str(e))
+        return None
 
     # 텍스트 길이 제한 (토큰 절약)
     max_text = 12000
@@ -538,19 +541,25 @@ def _extract_regex_fallback(text: str, tables: list[list[list[str]]], doc_type: 
     )
 
 
+# ---------------------------------------------------------------------------
+# 신뢰도 계산
+# ---------------------------------------------------------------------------
+
 def _calc_confidence(result: dict, doc_type: str) -> float:
-    key_fields = {
-        "plan":       ["name", "period_start", "period_end", "total_budget", "budget_categories"],
-        "agreement":  ["name", "code", "institution", "principal_investigator", "period_start"],
-        "researcher": ["researchers"],
-    }
-    fields = key_fields.get(doc_type, ["name", "total_budget"])
-    filled = sum(1 for f in fields if result.get(f) not in (None, [], {}, ""))
-    return round(filled / max(len(fields), 1), 2)
+    """추출된 필드 수에 따라 신뢰도(0.0~1.0)를 계산한다."""
+    key_fields = ["name", "code", "institution", "principal_investigator",
+                  "period_start", "period_end", "total_budget"]
+    filled = sum(1 for k in key_fields if result.get(k))
+    base = filled / len(key_fields)
+    if result.get("budget_categories"):
+        base = min(1.0, base + 0.1)
+    if doc_type == "researcher" and result.get("researchers"):
+        base = min(1.0, base + 0.15)
+    return round(base, 2)
 
 
 # ---------------------------------------------------------------------------
-# 공개 API (async)
+# 공개 API
 # ---------------------------------------------------------------------------
 
 async def extract_project_data(
@@ -558,42 +567,48 @@ async def extract_project_data(
     filename: str,
     doc_type: str = "auto",
 ) -> ExtractedProjectData:
-    """
-    Parameters
-    ----------
-    file_bytes : PDF 파일 바이트
-    filename   : 원본 파일명
-    doc_type   : "auto" | "plan" | "agreement" | "researcher"
+    """PDF에서 프로젝트 정보를 추출한다 (LLM 우선, regex fallback).
 
-    Returns
-    -------
-    ExtractedProjectData
-    """
-    logger.info("project_extract_start", filename=filename, doc_type=doc_type, size=len(file_bytes))
+    Args:
+        file_bytes: PDF 파일 바이트
+        filename:   원본 파일명 (로그용)
+        doc_type:   "auto" | "plan" | "agreement" | "researcher"
 
-    # 1. PDF 파싱
-    text   = _extract_pdf_text(file_bytes)
+    Returns:
+        ExtractedProjectData TypedDict
+    """
+    logger.info("pdf_extract_start", filename=filename, doc_type=doc_type)
+
+    # 1) PDF 텍스트·표 추출
+    text = _extract_pdf_text(file_bytes)
     tables = _extract_pdf_tables(file_bytes)
 
-    # 2. 문서 종류 자동 감지
-    if doc_type == "auto" or not doc_type:
+    if not text.strip():
+        logger.warning("pdf_empty_text", filename=filename)
+
+    # 2) 문서 종류 자동 감지
+    if doc_type == "auto":
         doc_type = _detect_doc_type(text)
-        logger.info("doc_type_auto_detected", doc_type=doc_type)
+        logger.info("doc_type_detected", doc_type=doc_type)
 
-    # 3. LLM 추출 (메인)
-    result = await _extract_with_llm(text, tables, doc_type)
+    # 3) LLM 추출 시도 (실패해도 regex fallback으로 계속 진행)
+    try:
+        result = await _extract_with_llm(text, tables, doc_type)
+    except Exception as e:
+        logger.warning("llm_extract_exception", error=str(e))
+        result = None
 
-    # 4. LLM 실패 시 regex fallback
+    # 4) LLM 실패 시 regex fallback
+    # 4) LLM 실패 시 regex fallback
     if result is None:
-        logger.warning("llm_extract_failed_using_regex", filename=filename)
+        logger.warning("llm_extract_failed_using_fallback", filename=filename)
         result = _extract_regex_fallback(text, tables, doc_type)
 
     logger.info(
-        "project_extract_done",
-        filename=filename, doc_type=result["doc_type"],
+        "pdf_extract_done",
+        filename=filename,
+        doc_type=result["doc_type"],
         confidence=result["confidence"],
-        name=result["name"], code=result["code"],
-        researcher_count=len(result["researchers"]),
-        budget_count=len(result["budget_categories"]),
+        name=result.get("name"),
     )
     return result

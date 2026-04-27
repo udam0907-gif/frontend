@@ -3,10 +3,11 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.logging import get_logger
@@ -187,6 +188,21 @@ async def get_project_stats(
     }
 
 
+@router.patch("/{project_id}/metadata")
+async def update_project_metadata(
+    project_id: uuid.UUID,
+    payload: dict[str, Any] = Body(...),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """과제 metadata_ JSONB 필드만 단순 업데이트한다."""
+    project = await _get_project_or_404(project_id, db)
+    project.metadata_ = payload
+    flag_modified(project, "metadata_")
+    await db.flush()
+    logger.info("project_metadata_updated", project_id=str(project_id))
+    return {"status": "ok"}
+
+
 @router.post("/extract-pdf", response_model=ExtractedProjectData)
 async def extract_pdf(
     file: UploadFile = File(...),
@@ -228,11 +244,18 @@ async def extract_pdf(
     except Exception as exc:
         logger.error("project_pdf_extract_error", filename=filename, error=str(exc))
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"PDF 추출 중 오류가 발생했습니다: {exc}",
         ) from exc
 
-    return ExtractedProjectData(**raw)
+    try:
+        return ExtractedProjectData(**raw)
+    except Exception as exc:
+        logger.error("project_pdf_schema_error", filename=filename, error=str(exc), raw=str(raw))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"추출 결과 변환 오류: {exc}",
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +372,6 @@ async def delete_researcher(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     from app.models.project import ProjectResearcher
-    from sqlalchemy import select
 
     await _get_project_or_404(project_id, db)
     result = await db.execute(
@@ -360,7 +382,10 @@ async def delete_researcher(
     )
     researcher = result.scalar_one_or_none()
     if not researcher:
-        raise HTTPException(status_code=404, detail="연구원을 찾을 수 없습니다.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"참여연구원 ID {researcher_id}를 찾을 수 없습니다.",
+        )
     await db.delete(researcher)
 
 
@@ -380,12 +405,11 @@ async def _save_project_file(
     project_id: uuid.UUID, filename: str, content: bytes
 ) -> str:
     import os
-    from pathlib import Path
     from app.config import settings
-
-    dest_dir = Path(settings.storage_documents_path) / "projects" / str(project_id)
-    dest_dir.mkdir(parents=True, exist_ok=True)
     safe_name = generate_safe_filename(filename)
-    dest_path = dest_dir / safe_name
-    dest_path.write_bytes(content)
-    return str(dest_path)
+    dir_path = os.path.join(settings.storage_dir, "projects", str(project_id))
+    os.makedirs(dir_path, exist_ok=True)
+    file_path = os.path.join(dir_path, safe_name)
+    with open(file_path, "wb") as f:
+        f.write(content)
+    return file_path

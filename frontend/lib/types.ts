@@ -54,6 +54,7 @@ export interface ProjectCreate {
   period_end: string;
   total_budget: number;
   budget_categories?: { category_type: CategoryType; allocated_amount: number }[];
+  metadata?: Record<string, unknown>;
 }
 
 // ─── Template ────────────────────────────────────────────────────────────────

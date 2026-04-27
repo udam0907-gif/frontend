@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { expensesApi, projectsApi, vendorsApi } from "@/lib/api";
@@ -23,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ReceiptText, Plus, Pencil, Trash2, X } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
 interface EditForm {
   title: string;
@@ -50,19 +51,16 @@ const CATEGORY_OPTIONS: { value: CategoryType; label: string }[] = [
 interface BaseForm {
   categoryType: CategoryType;
   expenseDate: string;
-  vendorId: string;   // 주업체 ID
-  vendorName: string; // 주업체명 (표시용)
-  compareVendorId: string;   // 비교견적업체 ID
-  compareVendorName: string; // 비교견적업체명 (표시용)
+  vendorId: string;
+  vendorName: string;
+  compareVendorId: string;
+  compareVendorName: string;
   amount: string;
   budgetItem: string;
   note: string;
   usagePurpose: string;
   purchasePurpose: string;
   deliveryDate: string;
-  spec: string;
-  quantity: string;
-  unitPrice: string;
 }
 
 interface MeetingFields {
@@ -71,8 +69,16 @@ interface MeetingFields {
   receiptFile: File | null;
 }
 
+interface LineItem {
+  id: string;
+  item_name: string;
+  spec: string;
+  quantity: string;
+  unit_price: string;
+}
+
 interface MaterialsFields {
-  productName: string;
+  lineItems: LineItem[];
 }
 
 interface OutsourcingFields {
@@ -107,13 +113,14 @@ const initialBase: BaseForm = {
   usagePurpose: "",
   purchasePurpose: "",
   deliveryDate: "",
-  spec: "",
-  quantity: "",
-  unitPrice: "",
 };
 
+const createInitialMaterials = (): MaterialsFields => ({
+  lineItems: [{ id: "1", item_name: "", spec: "", quantity: "", unit_price: "" }],
+});
+
 const initialMeeting: MeetingFields = { attendeeCount: "", purpose: "", receiptFile: null };
-const initialMaterials: MaterialsFields = { productName: "" };
+const initialMaterials: MaterialsFields = createInitialMaterials();
 const initialOutsourcing: OutsourcingFields = { productName: "", workContent: "", specification: "" };
 const initialTestReport: TestReportFields = { testInstitution: "", testItems: "", reportFile: null };
 const initialLabor: LaborFields = { researcherName: "", paymentType: "cash", participationMonths: "", participationRate: "" };
@@ -140,6 +147,13 @@ export default function ProjectExpensesPage() {
     title: "", amount: "", quantity: "", unitPrice: "",
     vendorId: "", vendorName: "", compareVendorId: "", expenseDate: "", note: "",
   });
+  const [inspectionDragId, setInspectionDragId] = useState<string | null>(null);
+  const [inspectionUploadingId, setInspectionUploadingId] = useState<string | null>(null);
+  const [inspectionMessages, setInspectionMessages] = useState<
+    Record<string, { type: "success" | "error" | "info"; text: string }>
+  >({});
+  // 방금 이 세션에서 새로 생성된 재료비 expense ID — 검수 이미지 업로드 섹션 표시에 사용
+  const [lastCreatedExpenseId, setLastCreatedExpenseId] = useState<string | null>(null);
 
   const { data: project } = useQuery({
     queryKey: ["project", projectId],
@@ -158,13 +172,15 @@ export default function ProjectExpensesPage() {
     queryFn: () => expensesApi.list(projectId),
     enabled: !!projectId,
   });
-
   const needsComparative = COMPARATIVE_CATEGORIES.includes(base.categoryType);
 
-  // 재료비: 수량 × 단가 자동계산
+  // 재료비: 행별 수량 × 단가 합산
   const materialsAutoAmount =
-    base.categoryType === "materials" && base.quantity && base.unitPrice
-      ? Number(base.quantity) * Number(base.unitPrice)
+    base.categoryType === "materials"
+      ? materials.lineItems.reduce(
+          (sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unit_price) || 0),
+          0
+        )
       : null;
 
   // 비교견적 금액 = 원금액 × 1.1
@@ -180,60 +196,59 @@ export default function ProjectExpensesPage() {
       : null;
 
   const buildInputData = (): Record<string, unknown> => {
-    const base_: Record<string, unknown> = {};
-    const quantity = Number(base.quantity) || 0;
-    const unitPrice = Number(base.unitPrice) || 0;
-    const lineAmount = quantity > 0 ? quantity * unitPrice : 0;
-    const itemName =
-      base.categoryType === "materials"
-        ? materials.productName || base.budgetItem
-        : base.categoryType === "outsourcing"
-        ? outsourcing.productName || base.budgetItem
-        : base.budgetItem;
-    if (base.vendorId) base_["vendor_id"] = base.vendorId;
+    const common: Record<string, unknown> = {};
+    if (base.vendorId) common["vendor_id"] = base.vendorId;
     if (base.compareVendorId) {
-      base_["compare_vendor_id"] = base.compareVendorId;
-      if (compareAmount) base_["compare_amount"] = compareAmount;
+      common["compare_vendor_id"] = base.compareVendorId;
+      if (compareAmount) common["compare_amount"] = compareAmount;
     }
-    if (base.usagePurpose) base_["usage_purpose"] = base.usagePurpose;
-    if (base.purchasePurpose) base_["purchase_purpose"] = base.purchasePurpose;
-    if (base.deliveryDate) base_["delivery_date"] = base.deliveryDate;
-    if (base.spec) base_["spec"] = base.spec;
-    if (quantity > 0) base_["quantity"] = quantity;
-    if (unitPrice > 0) base_["unit_price"] = unitPrice;
-    if (lineAmount > 0) base_["amount"] = lineAmount;
-    if (itemName || base.spec || quantity > 0 || unitPrice > 0) {
-      base_["line_items"] = [
-        {
-          item_name: itemName || undefined,
-          spec: base.spec || undefined,
-          quantity: quantity || undefined,
-          unit_price: unitPrice || undefined,
-          amount: lineAmount || undefined,
-        },
-      ];
-    }
+    if (base.usagePurpose) common["usage_purpose"] = base.usagePurpose;
+    if (base.purchasePurpose) common["purchase_purpose"] = base.purchasePurpose;
+    if (base.deliveryDate) common["delivery_date"] = base.deliveryDate;
 
     switch (base.categoryType) {
       case "meeting":
-        return { ...base_, attendee_count: Number(meeting.attendeeCount) || 0, purpose: meeting.purpose };
-      case "materials":
-        return { ...base_, product_name: materials.productName };
+        return { ...common, attendee_count: Number(meeting.attendeeCount) || 0, purpose: meeting.purpose };
+      case "materials": {
+        const lineItems = materials.lineItems
+          .filter(item => item.item_name || item.spec || Number(item.quantity) > 0 || Number(item.unit_price) > 0)
+          .map(item => {
+            const qty = Number(item.quantity) || 0;
+            const up = Number(item.unit_price) || 0;
+            return {
+              item_name: item.item_name || undefined,
+              spec: item.spec || undefined,
+              quantity: qty || undefined,
+              unit_price: up || undefined,
+              amount: (qty * up) || undefined,
+            };
+          });
+        return {
+          ...common,
+          line_items: lineItems.length > 0 ? lineItems : undefined,
+        };
+      }
       case "outsourcing":
-        return { ...base_, product_name: outsourcing.productName, work_content: outsourcing.workContent, specification: outsourcing.specification };
+        return { ...common, product_name: outsourcing.productName, work_content: outsourcing.workContent, specification: outsourcing.specification };
       case "test_report":
-        return { ...base_, test_institution: testReport.testInstitution, test_items: testReport.testItems };
+        return { ...common, test_institution: testReport.testInstitution, test_items: testReport.testItems };
       case "labor":
-        return { ...base_, researcher_name: labor.researcherName, payment_type: labor.paymentType, participation_months: Number(labor.participationMonths) || 0, participation_rate: Number(labor.participationRate) || 0 };
+        return { ...common, researcher_name: labor.researcherName, payment_type: labor.paymentType, participation_months: Number(labor.participationMonths) || 0, participation_rate: Number(labor.participationRate) || 0 };
       default:
-        return base_;
+        return common;
     }
   };
 
   const createMutation = useMutation({
     mutationFn: (data: ExpenseCreate) => expensesApi.create(data),
-    onSuccess: () => {
+    onSuccess: (expense) => {
       setMessage({ type: "success", text: "비용집행이 등록되었습니다." });
+      // 재료비 신규 등록 시 → 검수 이미지 업로드 섹션을 방금 생성된 건에 연결
+      if (expense.category_type === "materials") {
+        setLastCreatedExpenseId(expense.id);
+      } else {
+        setLastCreatedExpenseId(null);
+      }
       handleReset();
       queryClient.invalidateQueries({ queryKey: ["expenses", projectId] });
     },
@@ -328,6 +343,63 @@ export default function ProjectExpensesPage() {
     deleteMutation.mutate(expense.id);
   };
 
+  const setInspectionMessage = (
+    expenseId: string,
+    type: "success" | "error" | "info",
+    text: string
+  ) => {
+    setInspectionMessages((prev) => ({ ...prev, [expenseId]: { type, text } }));
+  };
+
+  const isAllowedInspectionImage = (file: File) => {
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    return ["jpg", "jpeg", "png"].includes(ext ?? "");
+  };
+
+  const handleInspectionImageUpload = async (expenseId: string, file: File | null | undefined) => {
+    if (!file) return;
+    if (!isAllowedInspectionImage(file)) {
+      setInspectionMessage(expenseId, "error", "JPG, JPEG, PNG 파일만 업로드할 수 있습니다.");
+      return;
+    }
+
+    setInspectionUploadingId(expenseId);
+    setInspectionMessage(expenseId, "info", `${file.name} 업로드 중...`);
+    try {
+      await expensesApi.uploadDocument(expenseId, "inspection_photos", file);
+      setInspectionMessage(expenseId, "success", `${file.name} 업로드 완료`);
+      await queryClient.invalidateQueries({ queryKey: ["expenses", projectId] });
+    } catch (err) {
+      setInspectionMessage(
+        expenseId,
+        "error",
+        err instanceof Error ? err.message : "검수 이미지 업로드에 실패했습니다."
+      );
+    } finally {
+      setInspectionUploadingId(null);
+      setInspectionDragId(null);
+    }
+  };
+
+  const handleInspectionImageDelete = async (expenseId: string, documentId: string) => {
+    if (!window.confirm("등록된 검수 이미지를 삭제하시겠습니까?")) return;
+    setInspectionUploadingId(expenseId);
+    setInspectionMessage(expenseId, "info", "검수 이미지 삭제 중...");
+    try {
+      await expensesApi.deleteDocument(expenseId, documentId);
+      setInspectionMessage(expenseId, "success", "검수 이미지가 삭제되었습니다.");
+      await queryClient.invalidateQueries({ queryKey: ["expenses", projectId] });
+    } catch (err) {
+      setInspectionMessage(
+        expenseId,
+        "error",
+        err instanceof Error ? err.message : "검수 이미지 삭제에 실패했습니다."
+      );
+    } finally {
+      setInspectionUploadingId(null);
+    }
+  };
+
   const handleSubmit = () => {
     if (!base.budgetItem.trim()) {
       setMessage({ type: "error", text: "예산항목을 입력하세요." });
@@ -359,12 +431,31 @@ export default function ProjectExpensesPage() {
   const handleReset = () => {
     setBase(initialBase);
     setMeeting(initialMeeting);
-    setMaterials(initialMaterials);
+    setMaterials(createInitialMaterials());
     setOutsourcing(initialOutsourcing);
     setTestReport(initialTestReport);
     setLabor(initialLabor);
     if (receiptRef.current) receiptRef.current.value = "";
     if (reportRef.current) reportRef.current.value = "";
+  };
+
+  const addLineItem = () => {
+    if (materials.lineItems.length >= 10) return;
+    setMaterials(f => ({
+      ...f,
+      lineItems: [...f.lineItems, { id: `${Date.now()}`, item_name: "", spec: "", quantity: "", unit_price: "" }],
+    }));
+  };
+
+  const removeLineItem = (index: number) => {
+    setMaterials(f => ({ ...f, lineItems: f.lineItems.filter((_, i) => i !== index) }));
+  };
+
+  const updateLineItem = (index: number, field: keyof Omit<LineItem, "id">, value: string) => {
+    setMaterials(f => ({
+      ...f,
+      lineItems: f.lineItems.map((item, i) => i === index ? { ...item, [field]: value } : item),
+    }));
   };
 
   const handleVendorSelect = (vendorId: string) => {
@@ -510,7 +601,7 @@ export default function ProjectExpensesPage() {
                   )}
                   {compareAmount !== null && (
                     <p className="text-xs text-blue-600 font-medium">
-                      비교견적 자동 금액: {compareAmount.toLocaleString()}원 (원금액 × 1.1)
+                      비교견적 자동 금액: {formatCurrency(compareAmount)} (원금액 × 1.1)
                     </p>
                   )}
                 </div>
@@ -579,37 +670,6 @@ export default function ProjectExpensesPage() {
                   onChange={(e) => setBase((f) => ({ ...f, deliveryDate: e.target.value }))}
                 />
               </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="spec">규격</Label>
-                <Input
-                  id="spec"
-                  value={base.spec}
-                  onChange={(e) => setBase((f) => ({ ...f, spec: e.target.value }))}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="quantity">수량</Label>
-                <Input
-                  id="quantity"
-                  type="number"
-                  min={0}
-                  value={base.quantity}
-                  onChange={(e) => setBase((f) => ({ ...f, quantity: e.target.value }))}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="unitPrice">단가</Label>
-                <Input
-                  id="unitPrice"
-                  type="number"
-                  min={0}
-                  value={base.unitPrice}
-                  onChange={(e) => setBase((f) => ({ ...f, unitPrice: e.target.value }))}
-                />
-              </div>
             </div>
           </div>
 
@@ -652,41 +712,163 @@ export default function ProjectExpensesPage() {
             )}
 
             {base.categoryType === "materials" && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1.5 sm:col-span-3">
-                  <Label>상품명</Label>
-                  <Input
-                    placeholder="예: NVIDIA A100 GPU"
-                    value={materials.productName}
-                    onChange={(e) => setMaterials((f) => ({ ...f, productName: e.target.value }))}
-                  />
+              <div className="space-y-3">
+                {/* 헤더 — 데스크탑만 표시 */}
+                <div className="hidden sm:grid sm:grid-cols-[2fr_80px_120px_120px_110px_32px] gap-2 px-1">
+                  <span className="text-xs font-medium text-gray-500">상품명</span>
+                  <span className="text-xs font-medium text-gray-500">수량</span>
+                  <span className="text-xs font-medium text-gray-500">규격</span>
+                  <span className="text-xs font-medium text-gray-500">단가 (원)</span>
+                  <span className="text-xs font-medium text-gray-500">금액</span>
+                  <span />
                 </div>
-                <div className="space-y-1.5">
-                  <Label>수량</Label>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={base.quantity}
-                    onChange={(e) => setBase((f) => ({ ...f, quantity: e.target.value }))}
-                  />
+
+                {materials.lineItems.map((item, index) => {
+                  const rowAmount = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+                  return (
+                    <div key={item.id} className="grid grid-cols-2 sm:grid-cols-[2fr_80px_120px_120px_110px_32px] gap-2 items-center rounded-lg border border-gray-100 p-2 sm:border-0 sm:p-0">
+                      <div className="col-span-2 sm:col-span-1">
+                        <Input
+                          placeholder="상품명"
+                          value={item.item_name}
+                          onChange={(e) => updateLineItem(index, "item_name", e.target.value)}
+                        />
+                      </div>
+                      <Input
+                        type="number"
+                        placeholder="수량"
+                        min={0}
+                        value={item.quantity}
+                        onChange={(e) => updateLineItem(index, "quantity", e.target.value)}
+                      />
+                      <Input
+                        placeholder="규격"
+                        value={item.spec}
+                        onChange={(e) => updateLineItem(index, "spec", e.target.value)}
+                      />
+                      <Input
+                        type="number"
+                        placeholder="단가"
+                        min={0}
+                        value={item.unit_price}
+                        onChange={(e) => updateLineItem(index, "unit_price", e.target.value)}
+                      />
+                      <Input
+                        readOnly
+                        className="bg-gray-50 text-right font-semibold text-sm"
+                        value={rowAmount > 0 ? formatCurrency(rowAmount) : ""}
+                        placeholder="0"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeLineItem(index)}
+                        disabled={materials.lineItems.length === 1}
+                        className="flex items-center justify-center w-8 h-8 text-gray-300 hover:text-red-500 disabled:opacity-0 disabled:cursor-default"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })}
+
+                <div className="flex items-center justify-between pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    disabled={materials.lineItems.length >= 10}
+                    onClick={addLineItem}
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1" />
+                    상품 추가
+                  </Button>
+                  {materialsAutoAmount !== null && materialsAutoAmount > 0 && (
+                    <span className="text-sm font-bold text-gray-800">
+                      합계: {formatCurrency(materialsAutoAmount)}
+                    </span>
+                  )}
                 </div>
-                <div className="space-y-1.5">
-                  <Label>단가 (원)</Label>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={base.unitPrice}
-                    onChange={(e) => setBase((f) => ({ ...f, unitPrice: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>금액 (자동계산)</Label>
-                  <Input
-                    readOnly
-                    className="bg-gray-50 font-semibold"
-                    value={materialsAutoAmount !== null ? materialsAutoAmount.toLocaleString() + "원" : ""}
-                  />
-                </div>
+
+                {/* 저장 직후 해당 건 검수 이미지 업로드 — 검수확인서에 자동 삽입됨 */}
+                {lastCreatedExpenseId && (() => {
+                  const savedExpense = (expenses ?? []).find(e => e.id === lastCreatedExpenseId);
+                  if (!savedExpense) return null;
+                  const inspImage = savedExpense.documents?.find(doc => doc.document_type === "inspection_photos");
+                  const inspMsg = inspectionMessages[lastCreatedExpenseId];
+                  const isBusy = inspectionUploadingId === lastCreatedExpenseId;
+                  const isDrag = inspectionDragId === lastCreatedExpenseId;
+                  return (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 space-y-3">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">
+                          재료비 검수 이미지 업로드
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          업로드한 이미지는 <span className="font-medium text-amber-700">검수확인서</span>에 자동 삽입됩니다.
+                          대상: <span className="font-medium">{savedExpense.title}</span>
+                        </p>
+                      </div>
+                      <div
+                        className={`rounded-lg border-2 border-dashed px-4 py-4 text-sm transition ${
+                          isDrag ? "border-amber-500 bg-amber-50" : "border-gray-200 bg-white"
+                        }`}
+                        onDragOver={(e) => { e.preventDefault(); setInspectionDragId(lastCreatedExpenseId); }}
+                        onDragLeave={() => setInspectionDragId(null)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          void handleInspectionImageUpload(lastCreatedExpenseId, e.dataTransfer.files?.[0]);
+                        }}
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="font-medium text-gray-800">
+                              파일을 드래그하거나 선택해서 업로드하세요
+                            </p>
+                            <p className="mt-1 text-xs text-gray-500">
+                              현재 파일: {inspImage?.filename ?? "등록된 검수 이미지 없음"}
+                            </p>
+                            {inspMsg && (
+                              <p className={`mt-1 text-xs ${
+                                inspMsg.type === "error" ? "text-red-600"
+                                : inspMsg.type === "success" ? "text-green-700"
+                                : "text-blue-600"
+                              }`}>
+                                {inspMsg.text}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label className="inline-flex cursor-pointer items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                              {isBusy ? "처리 중..." : inspImage ? "교체" : "파일 선택"}
+                              <input
+                                type="file"
+                                accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                                className="hidden"
+                                disabled={isBusy}
+                                onChange={(e) => {
+                                  void handleInspectionImageUpload(lastCreatedExpenseId, e.target.files?.[0]);
+                                  e.currentTarget.value = "";
+                                }}
+                              />
+                            </label>
+                            {inspImage && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={isBusy}
+                                onClick={() => handleInspectionImageDelete(lastCreatedExpenseId, inspImage.id)}
+                              >
+                                삭제
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -801,7 +983,7 @@ export default function ProjectExpensesPage() {
             <Button onClick={handleSubmit} disabled={createMutation.isPending}>
               {createMutation.isPending ? "저장 중..." : "저장"}
             </Button>
-            <Button variant="outline" onClick={handleReset}>
+            <Button variant="outline" onClick={() => { handleReset(); setLastCreatedExpenseId(null); }}>
               초기화
             </Button>
           </div>
@@ -839,44 +1021,116 @@ export default function ProjectExpensesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {(expenses ?? []).map((expense) => (
-                    <tr key={expense.id} className={`hover:bg-gray-50 ${editingExpense?.id === expense.id ? "bg-blue-50" : ""}`}>
-                      <td className="py-3 px-2">
-                        <span className="text-xs font-medium px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
-                          {CATEGORY_LABELS[expense.category_type]}
-                        </span>
-                      </td>
-                      <td className="py-3 px-2 font-medium text-gray-800">{expense.title}</td>
-                      <td className="py-3 px-2 text-gray-500 text-xs">{expense.vendor_name ?? "-"}</td>
-                      <td className="py-3 px-2 text-right text-gray-700 font-semibold">
-                        {expense.amount.toLocaleString()}원
-                      </td>
-                      <td className="py-3 px-2">
-                        <Badge className={`text-xs ${EXPENSE_STATUS_COLORS[expense.status]}`}>
-                          {EXPENSE_STATUS_LABELS[expense.status]}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-2">
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => editingExpense?.id === expense.id ? setEditingExpense(null) : handleStartEdit(expense)}
-                            className="p-1 rounded hover:bg-blue-100 text-blue-600"
-                            title="수정"
-                          >
-                            {editingExpense?.id === expense.id ? <X className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
-                          </button>
-                          <button
-                            onClick={() => handleDelete(expense)}
-                            disabled={deleteMutation.isPending}
-                            className="p-1 rounded hover:bg-red-100 text-red-500"
-                            title="삭제"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {(expenses ?? []).map((expense) => {
+                    const inspectionImage = expense.documents?.find(
+                      (doc) => doc.document_type === "inspection_photos"
+                    );
+                    const inspectionMessage = inspectionMessages[expense.id];
+                    const isInspectionBusy = inspectionUploadingId === expense.id;
+                    const isInspectionDrag = inspectionDragId === expense.id;
+
+                    return (
+                      <Fragment key={expense.id}>
+                        <tr className={`hover:bg-gray-50 ${editingExpense?.id === expense.id ? "bg-blue-50" : ""}`}>
+                          <td className="py-3 px-2">
+                            <span className="text-xs font-medium px-2 py-0.5 bg-gray-100 text-gray-600 rounded">
+                              {CATEGORY_LABELS[expense.category_type]}
+                            </span>
+                          </td>
+                          <td className="py-3 px-2 font-medium text-gray-800">{expense.title}</td>
+                          <td className="py-3 px-2 text-gray-500 text-xs">{expense.vendor_name ?? "-"}</td>
+                          <td className="py-3 px-2 text-right text-gray-700 font-semibold">
+                            {formatCurrency(expense.amount)}
+                          </td>
+                          <td className="py-3 px-2">
+                            <Badge className={`text-xs ${EXPENSE_STATUS_COLORS[expense.status]}`}>
+                              {EXPENSE_STATUS_LABELS[expense.status]}
+                            </Badge>
+                          </td>
+                          <td className="py-3 px-2">
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => editingExpense?.id === expense.id ? setEditingExpense(null) : handleStartEdit(expense)}
+                                className="p-1 rounded hover:bg-blue-100 text-blue-600"
+                                title="수정"
+                              >
+                                {editingExpense?.id === expense.id ? <X className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
+                              </button>
+                              <button
+                                onClick={() => handleDelete(expense)}
+                                disabled={deleteMutation.isPending}
+                                className="p-1 rounded hover:bg-red-100 text-red-500"
+                                title="삭제"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* 재료비 전용 — 검수 이미지 드래그앤드롭 행 */}
+                        {expense.category_type === "materials" && (
+                          <tr className="bg-amber-50/40">
+                            <td colSpan={6} className="px-2 py-2">
+                              <div
+                                className={`flex items-center gap-3 rounded-md border-2 border-dashed px-3 py-2 text-xs transition ${
+                                  isInspectionDrag ? "border-amber-400 bg-amber-100" : "border-amber-200 bg-white"
+                                }`}
+                                onDragOver={(e) => { e.preventDefault(); setInspectionDragId(expense.id); }}
+                                onDragLeave={() => setInspectionDragId(null)}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  void handleInspectionImageUpload(expense.id, e.dataTransfer.files?.[0]);
+                                }}
+                              >
+                                <span className="text-amber-600 font-medium shrink-0">검수 이미지</span>
+                                <span className="text-gray-400 shrink-0">→</span>
+                                <span className="text-gray-500 truncate">
+                                  {inspectionImage
+                                    ? `✓ ${inspectionImage.filename}`
+                                    : "파일을 여기에 드래그하거나 선택하세요 (검수확인서 자동 삽입)"}
+                                </span>
+                                {inspectionMessage && (
+                                  <span className={`shrink-0 ${
+                                    inspectionMessage.type === "error" ? "text-red-600"
+                                    : inspectionMessage.type === "success" ? "text-green-600"
+                                    : "text-blue-600"
+                                  }`}>
+                                    {isInspectionBusy ? "업로드 중..." : inspectionMessage.text}
+                                  </span>
+                                )}
+                                <div className="ml-auto flex items-center gap-1 shrink-0">
+                                  <label className="cursor-pointer inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 hover:bg-gray-50">
+                                    {isInspectionBusy ? "처리 중..." : inspectionImage ? "교체" : "파일 선택"}
+                                    <input
+                                      type="file"
+                                      accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                                      className="hidden"
+                                      disabled={isInspectionBusy}
+                                      onChange={(e) => {
+                                        void handleInspectionImageUpload(expense.id, e.target.files?.[0]);
+                                        e.currentTarget.value = "";
+                                      }}
+                                    />
+                                  </label>
+                                  {inspectionImage && (
+                                    <button
+                                      type="button"
+                                      disabled={isInspectionBusy}
+                                      onClick={() => handleInspectionImageDelete(expense.id, inspectionImage.id)}
+                                      className="rounded border border-gray-200 bg-white px-2 py-1 text-red-500 hover:bg-red-50 disabled:opacity-50"
+                                    >
+                                      삭제
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
 
@@ -904,7 +1158,7 @@ export default function ProjectExpensesPage() {
                           <Label className="text-xs">금액 (자동계산)</Label>
                           <Input readOnly className="bg-white" value={
                             editForm.quantity && editForm.unitPrice
-                              ? (Number(editForm.quantity) * Number(editForm.unitPrice)).toLocaleString() + "원"
+                              ? formatCurrency(Number(editForm.quantity) * Number(editForm.unitPrice))
                               : ""
                           } />
                         </div>
@@ -957,7 +1211,7 @@ export default function ProjectExpensesPage() {
                             ? Number(editForm.quantity) * Number(editForm.unitPrice)
                             : Number(editForm.amount);
                           return baseAmt > 0 ? (
-                            <p className="text-xs text-blue-600">비교견적 금액: {Math.ceil(baseAmt * 1.1).toLocaleString()}원</p>
+                            <p className="text-xs text-blue-600">비교견적 금액: {formatCurrency(Math.ceil(baseAmt * 1.1))}</p>
                           ) : null;
                         })()}
                       </div>
@@ -967,6 +1221,65 @@ export default function ProjectExpensesPage() {
                       <Label className="text-xs">비고</Label>
                       <Input value={editForm.note} onChange={e => setEditForm(f => ({ ...f, note: e.target.value }))} />
                     </div>
+
+                    {editingExpense.category_type === "materials" && (() => {
+                      const currentExpense = (expenses ?? []).find(e => e.id === editingExpense.id) ?? editingExpense;
+                      const inspImage = currentExpense.documents?.find(doc => doc.document_type === "inspection_photos");
+                      const inspMsg = inspectionMessages[editingExpense.id];
+                      const isBusy = inspectionUploadingId === editingExpense.id;
+                      const isDrag = inspectionDragId === editingExpense.id;
+                      return (
+                        <div className="space-y-1 sm:col-span-2">
+                          <Label className="text-xs">검수 이미지</Label>
+                          <div
+                            className={`rounded-lg border-2 border-dashed p-3 transition ${isDrag ? "border-amber-400 bg-amber-50" : "border-gray-200 bg-white"}`}
+                            onDragOver={e => { e.preventDefault(); setInspectionDragId(editingExpense.id); }}
+                            onDragLeave={() => setInspectionDragId(null)}
+                            onDrop={e => {
+                              e.preventDefault();
+                              void handleInspectionImageUpload(editingExpense.id, e.dataTransfer.files?.[0]);
+                            }}
+                          >
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <span className="text-xs text-gray-600">
+                                {inspImage ? `현재 파일: ${inspImage.filename}` : "등록된 검수 이미지 없음 — 드래그 또는 파일 선택"}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <label className="cursor-pointer inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium hover:bg-gray-50">
+                                  {isBusy ? "처리 중..." : inspImage ? "교체" : "파일 선택"}
+                                  <input
+                                    type="file"
+                                    accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                                    className="hidden"
+                                    disabled={isBusy}
+                                    onChange={e => {
+                                      void handleInspectionImageUpload(editingExpense.id, e.target.files?.[0]);
+                                      e.currentTarget.value = "";
+                                    }}
+                                  />
+                                </label>
+                                {inspImage && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={isBusy}
+                                    onClick={() => handleInspectionImageDelete(editingExpense.id, inspImage.id)}
+                                  >
+                                    삭제
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                            {inspMsg && (
+                              <p className={`mt-1 text-xs ${inspMsg.type === "error" ? "text-red-600" : inspMsg.type === "success" ? "text-green-700" : "text-blue-600"}`}>
+                                {inspMsg.text}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="flex gap-2">
                     <Button size="sm" onClick={handleSaveEdit} disabled={updateMutation.isPending}>

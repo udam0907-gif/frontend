@@ -22,6 +22,8 @@ Document Set Service — 비목별 문서세트 자동 생성 엔진
 
 from __future__ import annotations
 
+import math
+import random
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -53,6 +55,7 @@ DOCUMENT_SETS: dict[CategoryType, list[DocumentType]] = {
     CategoryType.materials: [
         DocumentType.quote,
         DocumentType.comparative_quote,
+        DocumentType.transaction_statement,
         DocumentType.expense_resolution,
         DocumentType.inspection_confirmation,
         DocumentType.vendor_business_registration,
@@ -99,8 +102,8 @@ VENDOR_TEMPLATE_DOCS: dict[DocumentType, str] = {
 # 비교견적서: 비교견적업체의 quote_template_path 사용
 COMPARATIVE_DOC = DocumentType.comparative_quote
 
-# 비교견적 금액 배율
-COMPARATIVE_MULTIPLIER = Decimal("1.1")
+# 비교견적 금액 배율 → 랜덤 배율(1.1~1.5)로 대체
+# COMPARATIVE_MULTIPLIER = Decimal("1.1")
 
 # CategoryType → 지출결의서 체크박스 레이블 매핑
 _CATEGORY_LABEL: dict[str, str] = {
@@ -214,6 +217,9 @@ class DocumentSetService:
 
         required_docs = DOCUMENT_SETS.get(expense.category_type, [])
         base_context = self._build_context(expense, project, company_setting)
+        inspection_image_path = await self._resolve_inspection_image_path(expense, db)
+        if inspection_image_path:
+            base_context["inspection_image_path"] = inspection_image_path
 
         result = DocumentSetResult(
             expense_item_id=expense_id,
@@ -314,6 +320,7 @@ class DocumentSetService:
             is_vendor_doc=False,
             db_template_id=template.id,
             batch_id=batch_id,
+            render_profile=template.render_profile,
         )
 
     # ─── 업체 바이너리 복사 ──────────────────────────────────────────────────
@@ -394,7 +401,7 @@ class DocumentSetService:
                 error_message=f"업체 원본 양식 미등록: {attr}",
                 is_vendor_doc=True,
             )
-        # 같은 document_type의 DB 템플릿 field_map을 vendor 파일에 적용
+        # 같은 document_type의 DB 템플릿 field_map / render_profile 을 vendor 파일에 적용
         db_template = await self._find_template(
             category_type=expense.category_type,
             document_type=doc_type,
@@ -402,12 +409,47 @@ class DocumentSetService:
             db=db,
         )
         field_map = db_template.field_map if db_template else {}
+        render_profile = db_template.render_profile if db_template else None
+
+        # XLSX 업체 템플릿이면 cell_map 자동 분석
+        ext = Path(file_path).suffix.lower()
+        if ext in (".xlsx", ".xls") and not field_map.get("_cell_map"):
+            try:
+                from app.services.llm_service import get_llm_service
+                from app.services.xlsx_cell_mapper import XlsxCellMapper
+                mapper = XlsxCellMapper(get_llm_service())
+                remap_result = await mapper.analyze(file_path)
+                cell_map = remap_result.get("cell_map", {})
+                if cell_map:
+                    field_map = dict(field_map)
+                    field_map["_cell_map"] = cell_map
+                    field_map["_mapping_status"] = "mapped"
+                    logger.info(
+                        "vendor_xlsx_auto_remapped",
+                        vendor_id=str(vendor.id),
+                        file_path=file_path,
+                        cell_count=len(cell_map),
+                    )
+            except Exception as remap_err:
+                logger.warning(
+                    "vendor_xlsx_auto_remap_failed",
+                    vendor_id=str(vendor.id),
+                    error=str(remap_err),
+                )
+
+        # vendor 상세 정보를 context에 보강
+        enriched_context = dict(context)
+        enriched_context.setdefault("supplier_name", vendor.name)
+        enriched_context.setdefault("vendor_name", vendor.name)
+        enriched_context.setdefault("company_name", vendor.name)
+        enriched_context.setdefault("vendor_business_number", vendor.business_number or "")
+        enriched_context.setdefault("vendor_contact", vendor.contact or "")
 
         return await self._render_from_template(
             doc_type=doc_type,
             template_path=file_path,
             field_map=field_map,
-            context=context,
+            context=enriched_context,
             project_data=project_data,
             expense=expense,
             template_id=f"vendor_{vendor.id}",
@@ -415,6 +457,7 @@ class DocumentSetService:
             db=db,
             is_vendor_doc=True,
             batch_id=batch_id,
+            render_profile=render_profile,
         )
 
     # ─── 비교견적서 ─────────────────────────────────────────────────────────
@@ -445,25 +488,71 @@ class DocumentSetService:
                 is_vendor_doc=True,
             )
 
-        # 비교견적 금액: meta의 compare_amount 우선, 없으면 × 1.1
+        # 비교견적 금액: meta의 compare_amount 우선, 없으면 1.1~1.5 랜덤 배율 × 100원 단위 올림
         meta = expense.metadata_ or {}
         if "compare_amount" in meta:
             compare_amount = int(meta["compare_amount"])
+            _random_rate = Decimal("1.1")  # note 출력용 기본값
         else:
             original = Decimal(str(expense.amount))
-            compare_amount = int((original * COMPARATIVE_MULTIPLIER).quantize(Decimal("1")))
+            _random_rate = Decimal(str(round(random.uniform(1.10, 1.50), 2)))
+            _raw_amount = int((original * _random_rate).quantize(Decimal("1")))
+            compare_amount = math.ceil(_raw_amount / 100) * 100
+            logger.info(
+                "comparative_amount_calculated",
+                original=int(original),
+                rate=str(_random_rate),
+                raw=_raw_amount,
+                rounded=compare_amount,
+            )
 
         context = dict(base_context)
+        quantity = Decimal(str(context.get("quantity") or 1))
+        compare_unit_price = compare_amount
+        if quantity not in (Decimal("0"), Decimal("0.0")):
+            try:
+                compare_unit_price = int((Decimal(str(compare_amount)) / quantity).quantize(Decimal("1")))
+            except Exception:
+                compare_unit_price = compare_amount
+
+        normalized_items: list[dict[str, Any]] = []
+        for raw_item in context.get("line_items") or []:
+            if not isinstance(raw_item, dict):
+                continue
+            item = dict(raw_item)
+            item["item_name"] = item.get("item_name") or context.get("item_name") or expense.title
+            item["quantity"] = item.get("quantity") or context.get("quantity") or 1
+            item["unit_price"] = compare_unit_price
+            item["amount"] = compare_amount
+            normalized_items.append(item)
+
+        if not normalized_items:
+            normalized_items = [{
+                "item_name": context.get("item_name") or context.get("product_name") or expense.title,
+                "spec": context.get("spec") or "",
+                "quantity": int(quantity) if quantity else 1,
+                "unit_price": compare_unit_price,
+                "amount": compare_amount,
+                "remark": context.get("remark") or "",
+            }]
+
+        context["line_items"] = normalized_items
+        context["item_name"] = normalized_items[0]["item_name"]
+        context["quantity"] = normalized_items[0]["quantity"]
+        context["unit_price"] = normalized_items[0]["unit_price"]
         context["amount"] = compare_amount
         context["total_amount"] = compare_amount
-        context["unit_price"] = compare_amount
-        context["vendor_name"] = compare_vendor.name
-        context["company_name"] = compare_vendor.name   # alias
+        context["vendor_name"] = base_context.get("our_company_name") or ""
+        context["company_name"] = compare_vendor.name
+        context["compare_vendor_name"] = compare_vendor.name
+        context["compare_vendor_registration"] = compare_vendor.business_number or ""
+        context["compare_vendor_contact"] = compare_vendor.contact or ""
         context["comparative_note"] = (
-            f"비교견적 ({compare_vendor.name} · 원견적 {int(expense.amount):,}원 기준 10% 인상)"
+            f"비교견적 ({compare_vendor.name} · 원견적 {int(expense.amount):,}원 기준 "
+            f"{int((_random_rate - 1) * 100)}% 인상)"
         )
 
-        # quote 문서 유형의 DB field_map을 비교견적서에도 적용
+        # quote 문서 유형의 DB field_map / render_profile 을 비교견적서에도 적용
         db_template = await self._find_template(
             category_type=expense.category_type,
             document_type=DocumentType.quote,
@@ -471,6 +560,33 @@ class DocumentSetService:
             db=db,
         )
         field_map = db_template.field_map if db_template else {}
+        render_profile = db_template.render_profile if db_template else None
+
+        # XLSX 비교견적서 템플릿이면 cell_map 자동 분석
+        ext = Path(file_path).suffix.lower()
+        if ext in (".xlsx", ".xls") and not field_map.get("_cell_map"):
+            try:
+                from app.services.llm_service import get_llm_service
+                from app.services.xlsx_cell_mapper import XlsxCellMapper
+                mapper = XlsxCellMapper(get_llm_service())
+                remap_result = await mapper.analyze(file_path)
+                cell_map = remap_result.get("cell_map", {})
+                if cell_map:
+                    field_map = dict(field_map)
+                    field_map["_cell_map"] = cell_map
+                    field_map["_mapping_status"] = "mapped"
+                    logger.info(
+                        "compare_vendor_xlsx_auto_remapped",
+                        vendor_id=str(compare_vendor.id),
+                        file_path=file_path,
+                        cell_count=len(cell_map),
+                    )
+            except Exception as remap_err:
+                logger.warning(
+                    "compare_vendor_xlsx_auto_remap_failed",
+                    vendor_id=str(compare_vendor.id),
+                    error=str(remap_err),
+                )
 
         return await self._render_from_template(
             doc_type=COMPARATIVE_DOC,
@@ -484,6 +600,7 @@ class DocumentSetService:
             db=db,
             is_vendor_doc=True,
             batch_id=batch_id,
+            render_profile=render_profile,
         )
 
     # ─── 공통 렌더 호출 ─────────────────────────────────────────────────────
@@ -502,8 +619,34 @@ class DocumentSetService:
         is_vendor_doc: bool,
         db_template_id: uuid.UUID | None = None,
         batch_id: str = "",
+        render_profile: dict[str, Any] | None = None,
     ) -> DocSetItem:
         try:
+            _ext = Path(template_path).suffix.lower()
+            if _ext in (".xlsx", ".xls") and not field_map.get("_cell_map"):
+                try:
+                    from app.services.llm_service import get_llm_service
+                    from app.services.xlsx_cell_mapper import XlsxCellMapper
+                    _mapper = XlsxCellMapper(get_llm_service())
+                    _remap_result = await _mapper.analyze(template_path)
+                    _cell_map = _remap_result.get("cell_map", {})
+                    if _cell_map:
+                        field_map = dict(field_map)
+                        field_map["_cell_map"] = _cell_map
+                        field_map["_mapping_status"] = "mapped"
+                        logger.info(
+                            "render_from_template_xlsx_auto_remapped",
+                            template_path=template_path,
+                            template_id=template_id,
+                            cell_count=len(_cell_map),
+                        )
+                except Exception as _remap_err:
+                    logger.warning(
+                        "render_from_template_xlsx_auto_remap_failed",
+                        template_path=template_path,
+                        error=str(_remap_err),
+                    )
+
             gen_result = await generator.generate(
                 template_path=template_path,
                 field_map=field_map,
@@ -512,6 +655,7 @@ class DocumentSetService:
                 expense_item_id=str(expense.id),
                 template_id=template_id,
                 document_type=doc_type.value,
+                render_profile=render_profile,
             )
 
             render_mode = gen_result.get("render_mode", "")
@@ -576,9 +720,10 @@ class DocumentSetService:
         company_setting: CompanySetting | None = None,
     ) -> dict[str, Any]:
         meta = expense.metadata_ or {}
+        vendor_name = expense.vendor_name or ""
         ctx: dict[str, Any] = {
             "expense_date":       expense.expense_date or "",
-            "vendor_name":        expense.vendor_name or "",
+            "vendor_name":        vendor_name,
             "vendor_registration":expense.vendor_registration_number or "",
             "amount":             int(expense.amount),
             "total_amount":       int(expense.amount),
@@ -625,8 +770,9 @@ class DocumentSetService:
         ctx.setdefault("budget_item_checkbox",  _make_budget_checkbox(expense.category_type))
         ctx.setdefault("item_name",             ctx.get("product_name") or expense.title)
         if company_setting:
+            manager_name = company_setting.default_manager_name or company_setting.representative_name or ""
             recipient_contact_parts = [
-                company_setting.default_manager_name,
+                manager_name,
                 company_setting.phone,
                 company_setting.email,
             ]
@@ -642,29 +788,107 @@ class DocumentSetService:
             ctx.setdefault("our_company_phone", company_setting.phone or "")
             ctx.setdefault("our_company_fax", company_setting.fax or "")
             ctx.setdefault("our_company_email", company_setting.email or "")
-            ctx.setdefault("our_company_manager_name", company_setting.default_manager_name or "")
+            ctx.setdefault("our_company_manager_name", manager_name)
 
-            ctx.setdefault("recipient_name", company_setting.company_name or "")
-            ctx.setdefault("recipient_registration_number", company_setting.company_registration_number or "")
-            ctx.setdefault("recipient_address", company_setting.address or "")
-            ctx.setdefault("recipient_business_type", company_setting.business_type or "")
-            ctx.setdefault("recipient_business_item", company_setting.business_item or "")
-            ctx.setdefault("recipient_representative", company_setting.representative_name or "")
-            ctx.setdefault("recipient_contact", recipient_contact)
+            # 수신자(귀중/귀하) — 우리 회사명으로 강제 설정 (setdefault는 빈 문자열을 유지하므로 강제 할당)
+            our_company = company_setting.company_name or ""
+            if our_company:
+                ctx["recipient_name"] = our_company
+                ctx["recipient"] = our_company
+                ctx["귀하"] = our_company
+                ctx["귀중"] = our_company
+                ctx["수신처"] = our_company
+                ctx["our_company_name"] = our_company
+            ctx.setdefault("recipient_registration_number", expense.vendor_registration_number or "")
+            ctx.setdefault("recipient_address", "")
+            ctx.setdefault("recipient_business_type", "")
+            ctx.setdefault("recipient_business_item", "")
+            ctx.setdefault("recipient_representative", "")
+            ctx.setdefault("recipient_contact", "")
 
-            ctx.setdefault("buyer_name", company_setting.company_name or "")
-            ctx.setdefault("buyer_registration_number", company_setting.company_registration_number or "")
-            ctx.setdefault("buyer_address", company_setting.address or "")
-            ctx.setdefault("buyer_business_type", company_setting.business_type or "")
-            ctx.setdefault("buyer_business_item", company_setting.business_item or "")
-            ctx.setdefault("buyer_representative", company_setting.representative_name or "")
-            ctx.setdefault("buyer_contact", recipient_contact)
+            ctx.setdefault("buyer_name", vendor_name or "")
+            ctx.setdefault("buyer_registration_number", expense.vendor_registration_number or "")
+            ctx.setdefault("buyer_address", "")
+            ctx.setdefault("buyer_business_type", "")
+            ctx.setdefault("buyer_business_item", "")
+            ctx.setdefault("buyer_representative", "")
+            ctx.setdefault("buyer_contact", "")
 
             ctx.setdefault("company_business_registration_path", company_setting.company_business_registration_path or "")
             ctx.setdefault("company_bank_copy_path", company_setting.company_bank_copy_path or "")
             ctx.setdefault("company_quote_template_path", company_setting.company_quote_template_path or "")
             ctx.setdefault("company_transaction_statement_template_path", company_setting.company_transaction_statement_template_path or "")
+        inspection_images = sorted(
+            [
+                doc for doc in (expense.documents or [])
+                if doc.document_type == DocumentType.inspection_photos and doc.file_path
+            ],
+            key=lambda doc: doc.created_at,
+        )
+        if inspection_images:
+            ctx["inspection_image_path"] = inspection_images[-1].file_path
+        ctx.setdefault("recipient_display_name", f"{vendor_name} 귀하" if vendor_name else "")
+
+        # vendor 정보가 context에 없으면 expense의 vendor_name으로 보완
+        if not ctx.get("supplier_name") and expense.vendor_name:
+            ctx.setdefault("supplier_name", expense.vendor_name)
+        if not ctx.get("vendor_name") and expense.vendor_name:
+            ctx.setdefault("vendor_name", expense.vendor_name)
+        if not ctx.get("company_name") and expense.vendor_name:
+            ctx.setdefault("company_name", expense.vendor_name)
+
+        # company_setting이 없는 경우 our_company_name fallback으로 recipient_name 보완
+        if not ctx.get("recipient_name") and ctx.get("our_company_name"):
+            our = ctx["our_company_name"]
+            ctx["recipient_name"] = our
+            ctx["recipient"] = our
+            ctx["귀하"] = our
+            ctx["귀중"] = our
+            ctx["수신처"] = our
+
         return ctx
+
+    async def _resolve_inspection_image_path(
+        self,
+        expense: ExpenseItem,
+        db: AsyncSession,
+    ) -> str | None:
+        own_images = sorted(
+            [
+                doc for doc in (expense.documents or [])
+                if doc.document_type == DocumentType.inspection_photos and doc.file_path
+            ],
+            key=lambda doc: doc.created_at,
+        )
+        if own_images:
+            return own_images[-1].file_path
+
+        if expense.category_type != CategoryType.materials:
+            return None
+
+        result = await db.execute(
+            select(ExpenseItem)
+            .where(
+                ExpenseItem.project_id == expense.project_id,
+                ExpenseItem.category_type == expense.category_type,
+                ExpenseItem.title == expense.title,
+                ExpenseItem.id != expense.id,
+            )
+            .options(selectinload(ExpenseItem.documents))
+            .order_by(ExpenseItem.created_at.desc())
+        )
+        related_expenses = result.scalars().all()
+        candidate_docs = []
+        for related in related_expenses:
+            for doc in related.documents or []:
+                if doc.document_type == DocumentType.inspection_photos and doc.file_path:
+                    candidate_docs.append(doc)
+
+        if not candidate_docs:
+            return None
+
+        candidate_docs.sort(key=lambda doc: doc.created_at)
+        return candidate_docs[-1].file_path
 
     def _project_data(self, project: Project) -> dict[str, Any]:
         return {

@@ -11,8 +11,25 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Plus, X } from "lucide-react";
 import Link from "next/link";
+import { formatCurrency } from "@/lib/utils";
+
+interface LineItem {
+  id: string;
+  item_name: string;
+  spec: string;
+  quantity: string;
+  unit_price: string;
+}
+
+const createLineItem = (): LineItem => ({
+  id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+  item_name: "",
+  spec: "",
+  quantity: "",
+  unit_price: "",
+});
 
 export default function NewExpensePage() {
   const router = useRouter();
@@ -34,11 +51,27 @@ export default function NewExpensePage() {
     usage_purpose: "",
     purchase_purpose: "",
     delivery_date: "",
-    spec: "",
-    quantity: "1",
-    unit_price: "",
   });
+  const [lineItems, setLineItems] = useState<LineItem[]>([createLineItem()]);
   const [error, setError] = useState("");
+
+  const addLineItem = () => {
+    if (lineItems.length >= 10) return;
+    setLineItems(prev => [...prev, createLineItem()]);
+  };
+
+  const removeLineItem = (index: number) => {
+    setLineItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const updateLineItem = (index: number, field: keyof Omit<LineItem, "id">, value: string) => {
+    setLineItems(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
+  };
+
+  const totalAmount = lineItems.reduce(
+    (sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unit_price) || 0),
+    0
+  );
 
   const mutation = useMutation({
     mutationFn: expensesApi.create,
@@ -53,10 +86,19 @@ export default function NewExpensePage() {
     e.preventDefault();
     setError("");
 
-    const quantity = Number(form.quantity || 0);
-    const unitPrice = Number(form.unit_price || 0);
-    const lineAmount =
-      quantity > 0 && unitPrice >= 0 ? quantity * unitPrice : undefined;
+    const builtLineItems = lineItems
+      .filter(item => item.item_name || item.spec || Number(item.quantity) > 0 || Number(item.unit_price) > 0)
+      .map(item => {
+        const qty = Number(item.quantity) || 0;
+        const up = Number(item.unit_price) || 0;
+        return {
+          item_name: item.item_name || undefined,
+          spec: item.spec || undefined,
+          quantity: qty || undefined,
+          unit_price: up || undefined,
+          amount: (qty * up) || undefined,
+        };
+      });
 
     mutation.mutate({
       project_id: form.project_id,
@@ -70,19 +112,7 @@ export default function NewExpensePage() {
         usage_purpose: form.usage_purpose || undefined,
         purchase_purpose: form.purchase_purpose || undefined,
         delivery_date: form.delivery_date || undefined,
-        spec: form.spec || undefined,
-        quantity: quantity || undefined,
-        unit_price: unitPrice || undefined,
-        amount: lineAmount,
-        line_items: [
-          {
-            item_name: form.title || undefined,
-            spec: form.spec || undefined,
-            quantity: quantity || undefined,
-            unit_price: unitPrice || undefined,
-            amount: lineAmount,
-          },
-        ],
+        line_items: builtLineItems.length > 0 ? builtLineItems : undefined,
       },
     });
   };
@@ -250,49 +280,87 @@ export default function NewExpensePage() {
 
             <div className="space-y-3 rounded-lg border border-gray-200 p-4">
               <div>
-                <p className="text-sm font-medium text-gray-900">품목 상세</p>
+                <p className="text-sm font-medium text-gray-900">품목 목록</p>
                 <p className="text-xs text-gray-500 mt-1">
                   DOCX line item 및 품의서 context에 사용됩니다.
                 </p>
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="spec">규격</Label>
-                <Input
-                  id="spec"
-                  value={form.spec}
-                  onChange={(e) => setForm({ ...form, spec: e.target.value })}
-                  placeholder="예: A4, 80g, 500매"
-                />
+              {/* 헤더 — 데스크탑만 */}
+              <div className="hidden sm:grid sm:grid-cols-[2fr_80px_120px_120px_110px_32px] gap-2 px-1">
+                <span className="text-xs font-medium text-gray-500">상품명</span>
+                <span className="text-xs font-medium text-gray-500">수량</span>
+                <span className="text-xs font-medium text-gray-500">규격</span>
+                <span className="text-xs font-medium text-gray-500">단가 (원)</span>
+                <span className="text-xs font-medium text-gray-500">금액</span>
+                <span />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="quantity">수량</Label>
-                  <Input
-                    id="quantity"
-                    type="number"
-                    min={1}
-                    value={form.quantity}
-                    onChange={(e) =>
-                      setForm({ ...form, quantity: e.target.value })
-                    }
-                    placeholder="1"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="unit_price">단가</Label>
-                  <Input
-                    id="unit_price"
-                    type="number"
-                    min={0}
-                    value={form.unit_price}
-                    onChange={(e) =>
-                      setForm({ ...form, unit_price: e.target.value })
-                    }
-                    placeholder="0"
-                  />
-                </div>
+              {lineItems.map((item, index) => {
+                const rowAmount = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+                return (
+                  <div key={item.id} className="grid grid-cols-2 sm:grid-cols-[2fr_80px_120px_120px_110px_32px] gap-2 items-center rounded-lg border border-gray-100 p-2 sm:border-0 sm:p-0">
+                    <div className="col-span-2 sm:col-span-1">
+                      <Input
+                        placeholder="상품명"
+                        value={item.item_name}
+                        onChange={(e) => updateLineItem(index, "item_name", e.target.value)}
+                      />
+                    </div>
+                    <Input
+                      type="number"
+                      placeholder="수량"
+                      min={0}
+                      value={item.quantity}
+                      onChange={(e) => updateLineItem(index, "quantity", e.target.value)}
+                    />
+                    <Input
+                      placeholder="규격"
+                      value={item.spec}
+                      onChange={(e) => updateLineItem(index, "spec", e.target.value)}
+                    />
+                    <Input
+                      type="number"
+                      placeholder="단가"
+                      min={0}
+                      value={item.unit_price}
+                      onChange={(e) => updateLineItem(index, "unit_price", e.target.value)}
+                    />
+                    <Input
+                      readOnly
+                      className="bg-gray-50 text-right font-semibold text-sm"
+                      value={rowAmount > 0 ? formatCurrency(rowAmount) : ""}
+                      placeholder="0"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeLineItem(index)}
+                      disabled={lineItems.length === 1}
+                      className="flex items-center justify-center w-8 h-8 text-gray-300 hover:text-red-500 disabled:opacity-0 disabled:cursor-default"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                );
+              })}
+
+              <div className="flex items-center justify-between pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
+                  disabled={lineItems.length >= 10}
+                  onClick={addLineItem}
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  상품 추가
+                </Button>
+                {totalAmount > 0 && (
+                  <span className="text-sm font-bold text-gray-800">
+                    합계: {formatCurrency(totalAmount)}
+                  </span>
+                )}
               </div>
             </div>
           </CardContent>

@@ -86,6 +86,7 @@ async def generate_document(
         project_data=project_data,
         expense_item_id=str(payload.expense_item_id),
         template_id=str(payload.template_id),
+        render_profile=template.render_profile,
     )
 
     gen_doc = GeneratedDocument(

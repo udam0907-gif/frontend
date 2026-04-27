@@ -55,5 +55,6 @@ async def init_db() -> None:
             project,
             rcms,
             template,
+            vendor_pool,
         )
         await conn.run_sync(Base.metadata.create_all)

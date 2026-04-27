@@ -18,6 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ClipboardList } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
 // 비목별 상세 필드 정의
 const DETAIL_FIELDS: Record<CategoryType, { key: string; label: string }[]> = {
@@ -53,7 +54,10 @@ function formatValue(key: string, value: unknown): string {
   if (key === "payment_type") {
     return value === "cash" ? "현금" : value === "in_kind" ? "현물" : String(value);
   }
-  if (typeof value === "number") return value.toLocaleString();
+  if (typeof value === "number") {
+    if (key === "unit_price" || key === "amount") return formatCurrency(value);
+    return value.toLocaleString("ko-KR");
+  }
   return String(value);
 }
 
@@ -75,7 +79,7 @@ function ExpenseDetailCard({ expense }: { expense: ExpenseItem }) {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm font-bold text-gray-700">
-              {expense.amount.toLocaleString()}원
+              {formatCurrency(expense.amount)}
             </span>
             <Badge
               className={`text-xs ${EXPENSE_STATUS_COLORS[expense.status]}`}

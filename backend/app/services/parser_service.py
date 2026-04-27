@@ -3,11 +3,19 @@ from __future__ import annotations
 import io
 from pathlib import Path
 from typing import Any
+from zipfile import ZipFile
+import xml.etree.ElementTree as ET
 
 from app.core.exceptions import ParseError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+_WORD_NS = {
+    "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "rel": "http://schemas.openxmlformats.org/package/2006/relationships",
+}
 
 
 class ParsedPage:
@@ -76,7 +84,26 @@ class ParserService:
 
         try:
             doc = Document(file_path)
-            full_text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            parts: list[str] = []
+
+            for paragraph in doc.paragraphs:
+                text = paragraph.text.strip()
+                if text:
+                    parts.append(text)
+
+            for table in doc.tables:
+                for row in table.rows:
+                    cells = [cell.text.replace("\n", " ").strip() for cell in row.cells]
+                    cells = [cell for cell in cells if cell]
+                    if cells:
+                        parts.append("\t".join(cells))
+
+            extra_parts = self._extract_docx_xml_text(file_path)
+            for extra in extra_parts:
+                if extra and extra not in parts:
+                    parts.append(extra)
+
+            full_text = "\n".join(parts)
             chunks = self._split_into_pages(full_text)
             pages = []
             for i, chunk in enumerate(chunks, start=1):
@@ -89,6 +116,43 @@ class ParserService:
             return pages
         except Exception as e:
             raise ParseError(f"DOCX 파싱 실패: {e}") from e
+
+    def _extract_docx_xml_text(self, file_path: str) -> list[str]:
+        parts: list[str] = []
+        try:
+            with ZipFile(file_path) as archive:
+                rel_targets: dict[str, str] = {}
+                rels_path = "word/_rels/document.xml.rels"
+                if rels_path in archive.namelist():
+                    rels_root = ET.fromstring(archive.read(rels_path))
+                    for rel in rels_root.findall("rel:Relationship", _WORD_NS):
+                        rel_id = rel.attrib.get("Id")
+                        target = rel.attrib.get("Target")
+                        if rel_id and target:
+                            rel_targets[rel_id] = target
+
+                document_path = "word/document.xml"
+                if document_path not in archive.namelist():
+                    return parts
+
+                root = ET.fromstring(archive.read(document_path))
+
+                for textbox in root.findall(".//w:txbxContent", _WORD_NS):
+                    texts = [node.text.strip() for node in textbox.findall(".//w:t", _WORD_NS) if node.text and node.text.strip()]
+                    if texts:
+                        parts.append(" ".join(texts))
+
+                    for hyperlink in textbox.findall(".//w:hyperlink", _WORD_NS):
+                        rel_id = hyperlink.attrib.get(f"{{{_WORD_NS['r']}}}id")
+                        if not rel_id:
+                            continue
+                        target = rel_targets.get(rel_id, "")
+                        if target.startswith("mailto:"):
+                            parts.append(target.replace("mailto:", "", 1))
+        except Exception as e:
+            logger.warning("docx_xml_extract_failed", file=file_path, error=str(e))
+
+        return parts
 
     def _parse_xlsx(self, file_path: str) -> list[ParsedPage]:
         try:

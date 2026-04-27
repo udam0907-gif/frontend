@@ -23,6 +23,6 @@ def compute_file_hash(content: bytes) -> str:
 
 
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".jpg", ".jpeg", ".png"}
-ALLOWED_TEMPLATE_EXTENSIONS = {".docx", ".xlsx", ".pdf", ".jpg", ".jpeg", ".png"}
+ALLOWED_TEMPLATE_EXTENSIONS = {".docx", ".xlsx", ".xls"}
 ALLOWED_MANUAL_EXTENSIONS = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".jpg", ".jpeg", ".png"}
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, ChevronRight } from "lucide-react";
 import Link from "next/link";
+import { formatCurrency } from "@/lib/utils";
 
 const STATUS_COLOR: Record<string, string> = {
   active: "bg-green-100 text-green-700",
@@ -92,7 +93,7 @@ export default function ProjectsPage() {
                           >
                             {CATEGORY_LABELS[cat.category_type] ??
                               cat.category_type}
-                            : {cat.allocated_amount.toLocaleString()}원
+                            : {formatCurrency(cat.allocated_amount)}
                           </span>
                         ))}
                       </div>
@@ -102,7 +103,7 @@ export default function ProjectsPage() {
                   <div className="flex flex-col items-end gap-3 shrink-0">
                     <div className="text-right">
                       <p className="text-lg font-bold text-gray-800">
-                        {project.total_budget.toLocaleString()}원
+                        {formatCurrency(project.total_budget)}
                       </p>
                       <p className="text-xs text-gray-400 mt-0.5">총 예산</p>
                     </div>

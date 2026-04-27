@@ -20,6 +20,7 @@ import {
   DollarSign,
   Activity,
 } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
 const STATUS_COLOR: Record<string, string> = {
   active: "bg-green-100 text-green-700",
@@ -146,7 +147,7 @@ export default function ProjectSettingsPage() {
                 <Skeleton className="h-6 w-28 mt-1" />
               ) : (
                 <p className="text-lg font-bold text-gray-900">
-                  {(project?.total_budget ?? 0).toLocaleString()}원
+                  {formatCurrency(project?.total_budget ?? 0)}
                 </p>
               )}
             </div>
@@ -164,7 +165,7 @@ export default function ProjectSettingsPage() {
                 <Skeleton className="h-6 w-28 mt-1" />
               ) : (
                 <p className="text-lg font-bold text-gray-900">
-                  {totalSpent.toLocaleString()}원
+                  {formatCurrency(totalSpent)}
                 </p>
               )}
             </div>
@@ -182,10 +183,7 @@ export default function ProjectSettingsPage() {
                 <Skeleton className="h-6 w-28 mt-1" />
               ) : (
                 <p className="text-lg font-bold text-gray-900">
-                  {(
-                    (project?.total_budget ?? 0) - totalSpent
-                  ).toLocaleString()}
-                  원
+                  {formatCurrency((project?.total_budget ?? 0) - totalSpent)}
                 </p>
               )}
             </div>
@@ -202,7 +200,7 @@ export default function ProjectSettingsPage() {
           <CardContent>
             <div className="flex items-center justify-between text-sm mb-2">
               <span className="text-gray-600">
-                {totalSpent.toLocaleString()}원 / {project.total_budget.toLocaleString()}원
+                {formatCurrency(totalSpent)} / {formatCurrency(project.total_budget)}
               </span>
               <span className="font-bold text-gray-800">{executionRate}%</span>
             </div>
@@ -251,8 +249,8 @@ export default function ProjectSettingsPage() {
                             cat.category_type}
                         </span>
                         <span className="text-gray-500 text-xs">
-                          {cat.spent_amount.toLocaleString()} /{" "}
-                          {cat.allocated_amount.toLocaleString()}원
+                          {formatCurrency(cat.spent_amount)} /{" "}
+                          {formatCurrency(cat.allocated_amount)}
                         </span>
                       </div>
                       <div className="h-2 bg-gray-100 rounded-full overflow-hidden">

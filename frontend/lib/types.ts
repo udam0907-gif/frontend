@@ -40,6 +40,7 @@ export interface Project {
   status: ProjectStatus;
   agreement_file_path: string | null;
   plan_file_path: string | null;
+  metadata_: Record<string, unknown>;
   budget_categories: BudgetCategory[];
   created_at: string;
 }
@@ -53,6 +54,7 @@ export interface ProjectCreate {
   period_end: string;
   total_budget: number;
   budget_categories?: { category_type: CategoryType; allocated_amount: number }[];
+  metadata?: Record<string, unknown>;
 }
 
 // ─── Template ────────────────────────────────────────────────────────────────
@@ -76,8 +78,13 @@ export interface Template {
 export interface ExpenseDocument {
   id: string;
   document_type: string;
-  original_filename: string;
+  filename: string;
+  file_path: string;
+  file_size?: number | null;
+  mime_type?: string | null;
   upload_status: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ExpenseItem {
@@ -369,6 +376,60 @@ export interface DocumentSetResponse {
   items: DocSetItem[];
 }
 
+// ─── Project Researcher ──────────────────────────────────────────────────────
+
+export interface ProjectResearcher {
+  id: string;
+  project_id: string;
+  personnel_type: "기존" | "신규";
+  name: string;
+  position: string | null;
+  annual_salary: number | null;
+  monthly_salary: number | null;
+  participation_months: number | null;
+  participation_rate: number | null;
+  cash_amount: number | null;
+  in_kind_amount: number | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearcherCreate {
+  personnel_type: "기존" | "신규";
+  name: string;
+  position?: string | null;
+  annual_salary?: number | null;
+  monthly_salary?: number | null;
+  participation_months?: number | null;
+  participation_rate?: number | null;
+  cash_amount?: number | null;
+  in_kind_amount?: number | null;
+  sort_order?: number;
+}
+
+export interface ExtractedBudgetCategory {
+  category_type: CategoryType;
+  allocated_amount: number;
+}
+
+export interface ExtractedProjectData {
+  name: string | null;
+  code: string | null;
+  institution: string | null;
+  principal_investigator: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  total_budget: number | null;
+  budget_categories: ExtractedBudgetCategory[];
+  researchers: ResearcherCreate[];
+  overview: string | null;
+  deliverables: string | null;
+  schedule: string | null;
+  doc_type: string;
+  confidence: number;
+}
+
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 export interface ApiError {
@@ -391,6 +452,13 @@ export type CompanySettingsUploadType =
   | "transaction_statement_template"
   | "seal_image";
 
+export interface CompanySettingsFileStatus {
+  path: string | null;
+  exists: boolean;
+  file_name: string | null;
+  updated_at: string | null;
+}
+
 export interface CompanySettings {
   id: string | null;
   company_id: string;
@@ -403,12 +471,12 @@ export interface CompanySettings {
   phone: string | null;
   fax: string | null;
   email: string | null;
-  default_manager_name: string | null;
   seal_image_path: string | null;
   company_business_registration_path: string | null;
   company_bank_copy_path: string | null;
   company_quote_template_path: string | null;
   company_transaction_statement_template_path: string | null;
+  file_statuses: Record<CompanySettingsUploadType, CompanySettingsFileStatus>;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -424,10 +492,28 @@ export interface CompanySettingsUpdate {
   phone?: string;
   fax?: string;
   email?: string;
-  default_manager_name?: string;
   seal_image_path?: string;
   company_business_registration_path?: string;
   company_bank_copy_path?: string;
   company_quote_template_path?: string;
   company_transaction_statement_template_path?: string;
+}
+
+export interface CompanySettingsExtractedFields {
+  company_name?: string | null;
+  company_registration_number?: string | null;
+  representative_name?: string | null;
+  address?: string | null;
+  business_type?: string | null;
+  business_item?: string | null;
+  phone?: string | null;
+  fax?: string | null;
+  email?: string | null;
+}
+
+export interface CompanySettingsExtractResponse {
+  company_id: string;
+  extracted: CompanySettingsExtractedFields;
+  source_by_field: Record<string, string>;
+  used_files: string[];
 }

@@ -2,6 +2,9 @@ import axios, { AxiosError } from "axios";
 import type {
   Project,
   ProjectCreate,
+  ProjectResearcher,
+  ResearcherCreate,
+  ExtractedProjectData,
   Template,
   ExpenseItem,
   ExpenseCreate,
@@ -17,6 +20,7 @@ import type {
   DocumentSetResponse,
   FieldRegistryItem,
   CompanySettings,
+  CompanySettingsExtractResponse,
   CompanySettingsUpdate,
   CompanySettingsUploadType,
 } from "./types";
@@ -31,8 +35,14 @@ export const apiClient = axios.create({
 apiClient.interceptors.response.use(
   (res) => res,
   (err: AxiosError) => {
-    const msg =
-      (err.response?.data as { message?: string })?.message ?? err.message;
+    const data = err.response?.data as { message?: string; detail?: string | { detail?: string } } | undefined;
+    const detail =
+      typeof data?.detail === "string"
+        ? data.detail
+        : typeof data?.detail === "object" && data.detail && "detail" in data.detail
+          ? data.detail.detail
+          : undefined;
+    const msg = data?.message ?? detail ?? err.message;
     return Promise.reject(new Error(msg));
   }
 );
@@ -48,6 +58,12 @@ export const projectsApi = {
   create: (data: ProjectCreate) =>
     apiClient.post<Project>("/projects", data).then((r) => r.data),
 
+  update: (id: string, data: Partial<Pick<ProjectCreate, "name" | "institution" | "principal_investigator" | "period_start" | "period_end" | "total_budget" | "status"> & { metadata?: Record<string, unknown> }>) =>
+    apiClient.patch<Project>(`/projects/${id}`, data).then((r) => r.data),
+
+  updateMetadata: (id: string, metadata: Record<string, unknown>) =>
+    apiClient.patch<{ status: string }>(`/projects/${id}/metadata`, metadata).then((r) => r.data),
+
   uploadFile: (id: string, type: "agreement" | "plan", file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -57,6 +73,27 @@ export const projectsApi = {
       })
       .then((r) => r.data);
   },
+
+  extractPdf: (docType: "auto" | "plan" | "agreement" | "researcher", file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return apiClient
+      .post<ExtractedProjectData>(`/projects/extract-pdf?doc_type=${docType}`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
+      })
+      .then((r) => r.data);
+  },
+
+  listResearchers: (projectId: string) =>
+    apiClient
+      .get<ProjectResearcher[]>(`/projects/${projectId}/researchers`)
+      .then((r) => r.data),
+
+  upsertResearchers: (projectId: string, researchers: ResearcherCreate[]) =>
+    apiClient
+      .post<ProjectResearcher[]>(`/projects/${projectId}/researchers`, researchers)
+      .then((r) => r.data),
 };
 
 // ─── Templates ───────────────────────────────────────────────────────────────
@@ -101,6 +138,21 @@ export const templatesApi = {
     apiClient
       .put<Template>(`/templates/${id}/cell-mapping`, { mapping })
       .then((r) => r.data),
+
+  getRenderProfile: (id: string) =>
+    apiClient
+      .get<{ template_id: string; document_type: string; render_profile: Record<string, unknown> | null; strategy_examples: Record<string, unknown> }>(`/templates/${id}/render-profile`)
+      .then((r) => r.data),
+
+  setRenderProfile: (id: string, profile: Record<string, unknown>) =>
+    apiClient
+      .put<Template>(`/templates/${id}/render-profile`, profile)
+      .then((r) => r.data),
+
+  clearRenderProfile: (id: string) =>
+    apiClient
+      .delete<Template>(`/templates/${id}/render-profile`)
+      .then((r) => r.data),
 };
 
 // ─── Expenses ────────────────────────────────────────────────────────────────
@@ -133,6 +185,9 @@ export const expensesApi = {
       })
       .then((r) => r.data);
   },
+
+  deleteDocument: (expenseId: string, documentId: string) =>
+    apiClient.delete(`/expenses/${expenseId}/documents/${documentId}`).then((r) => r.data),
 };
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -319,4 +374,18 @@ export const companySettingsApi = {
       })
       .then((r) => r.data);
   },
+
+  deleteFile: (companyId: string, fileType: CompanySettingsUploadType) =>
+    apiClient
+      .delete<CompanySettings>("/company-settings/files", {
+        params: { company_id: companyId, file_type: fileType },
+      })
+      .then((r) => r.data),
+
+  extract: (companyId = "default", fileType?: CompanySettingsUploadType) =>
+    apiClient
+      .post<CompanySettingsExtractResponse>("/company-settings/extract", null, {
+        params: { company_id: companyId, file_type: fileType },
+      })
+      .then((r) => r.data),
 };

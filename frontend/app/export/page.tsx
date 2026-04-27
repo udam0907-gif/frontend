@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Download, Package } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
 export default function ExportPage() {
   const [exportingId, setExportingId] = useState<string | null>(null);
@@ -92,7 +93,7 @@ export default function ExportPage() {
                         {expense.title}
                       </p>
                       <p className="text-xs text-gray-400 mt-0.5">
-                        {expense.amount.toLocaleString()}원
+                        {formatCurrency(expense.amount)}
                         {expense.vendor_name && ` · ${expense.vendor_name}`}
                       </p>
                     </div>

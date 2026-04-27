@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import uuid
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.database import get_db
+from app.models.document import GeneratedDocument
 from app.models.enums import CategoryType, DocumentType
 from app.models.template import Template
 from app.schemas.layout_map import LAYOUT_DRAFTS, LayoutMap
+from app.schemas.render_profile import RenderProfile, STRATEGY_EXAMPLES
 from app.schemas.template import TemplateRead, TemplateUpdate
 from app.services.template_service import TemplateService
 
@@ -60,6 +64,26 @@ async def upload_template(
     safe_filename, file_path = _template_service.save_file(original_filename, content)
     field_map = _template_service.extract_placeholders(file_path)
 
+    layout_map = _template_service.build_layout_map(file_path)
+    ext = Path(original_filename).suffix.lower()
+    if ext == ".docx":
+        file_format = "docx"
+        render_profile = {
+            "engine": "docxtpl",
+            "preserve_formatting": True,
+            "fill_strategy": "placeholder",
+            "output_format": "docx",
+        }
+    else:
+        file_format = ext.lstrip(".")
+        render_profile = {
+            "engine": "openpyxl",
+            "preserve_formatting": True,
+            "fill_strategy": "cell_value",
+            "output_format": file_format,
+            "sheet_count": len(layout_map.get("sheets", [])),
+        }
+
     template = Template(
         id=uuid.uuid4(),
         name=name,
@@ -67,8 +91,11 @@ async def upload_template(
         document_type=document_type,
         filename=safe_filename,
         file_path=file_path,
+        file_format=file_format,
         version=version,
         field_map=field_map,
+        layout_map=layout_map,
+        render_profile=render_profile,
         is_active=True,
         description=description,
         project_id=project_id,
@@ -128,6 +155,11 @@ async def delete_template(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     template = await _get_or_404(template_id, db)
+    await db.execute(
+        update(GeneratedDocument)
+        .where(GeneratedDocument.template_id == template_id)
+        .values(template_id=None)
+    )
     _template_service.delete_file(template.file_path)
     await db.delete(template)
 
@@ -141,7 +173,10 @@ async def get_template_fields(
     return {
         "template_id": str(template.id),
         "template_name": template.name,
+        "file_format": template.file_format,
         "field_map": template.field_map,
+        "layout_map": template.layout_map,
+        "render_profile": template.render_profile,
     }
 
 
@@ -232,6 +267,54 @@ async def set_cell_mapping(
     return template
 
 
+@router.get("/{template_id}/render-profile")
+async def get_render_profile(
+    template_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """저장된 render_profile 조회. 없으면 null 반환."""
+    template = await _get_or_404(template_id, db)
+    return {
+        "template_id": str(template_id),
+        "document_type": template.document_type.value,
+        "render_profile": template.render_profile,
+        "strategy_examples": STRATEGY_EXAMPLES,
+    }
+
+
+@router.put("/{template_id}/render-profile", response_model=TemplateRead)
+async def set_render_profile(
+    template_id: uuid.UUID,
+    payload: RenderProfile,
+    db: AsyncSession = Depends(get_db),
+) -> Template:
+    """render_profile 저장. 기존 field_map / layout_map 은 변경하지 않는다."""
+    template = await _get_or_404(template_id, db)
+    template.render_profile = payload.to_dict()
+    await db.flush()
+    await db.refresh(template)
+    logger.info(
+        "render_profile_saved",
+        template_id=str(template_id),
+        doc_type=payload.doc_type,
+        render_strategy=payload.render_strategy,
+    )
+    return template
+
+
+@router.delete("/{template_id}/render-profile", response_model=TemplateRead)
+async def clear_render_profile(
+    template_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> Template:
+    """render_profile 초기화 (자동감지 fallback으로 되돌림)."""
+    template = await _get_or_404(template_id, db)
+    template.render_profile = None
+    await db.flush()
+    await db.refresh(template)
+    return template
+
+
 @router.get("/layouts/drafts")
 async def get_layout_drafts() -> dict:
     """문서 타입별 layout_map 구조 초안 조회."""
@@ -268,6 +351,40 @@ async def set_layout_map(
     await db.flush()
     await db.refresh(template)
     logger.info("layout_map_saved", template_id=str(template_id), document_type=payload.document_type)
+    return template
+
+
+@router.post("/{template_id}/remap", response_model=TemplateRead)
+async def remap_template_cells(
+    template_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> Template:
+    """XLSX 템플릿의 셀 좌표를 Claude API로 자동 분석."""
+    from app.services.llm_service import get_llm_service
+    from app.services.xlsx_cell_mapper import XlsxCellMapper
+
+    template = await _get_or_404(template_id, db)
+
+    ext = Path(template.file_path).suffix.lower()
+    if ext not in (".xlsx", ".xls"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="XLSX/XLS 파일만 셀 매핑 가능합니다.",
+        )
+
+    mapper = XlsxCellMapper(get_llm_service())
+    result = await mapper.analyze(template.file_path)
+    cell_map = result.get("cell_map", {})
+
+    template.field_map = {
+        **template.field_map,
+        "_cell_map": cell_map,
+        "_mapping_status": "auto_mapped",
+    }
+    await db.flush()
+    await db.refresh(template)
+
+    logger.info("template_remapped", template_id=str(template_id))
     return template
 
 

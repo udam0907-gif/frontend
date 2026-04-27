@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -131,6 +131,7 @@ async def delete_expense(
 @router.post("/{expense_id}/documents", response_model=ExpenseDocumentRead, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     expense_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     document_type: DocumentType = Form(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
@@ -192,6 +193,15 @@ async def upload_document(
     db.add(doc)
     await db.flush()
     await db.refresh(doc)
+
+    doc_id = doc.id
+    background_tasks.add_task(
+        _extract_document_data_background,
+        doc_id,
+        file_path,
+        original_filename,
+    )
+
     logger.info(
         "expense_document_uploaded",
         expense_id=str(expense_id),
@@ -236,6 +246,30 @@ async def delete_expense_document(
     except OSError:
         pass
     await db.delete(doc)
+
+
+async def _extract_document_data_background(
+    document_id: uuid.UUID,
+    file_path: str,
+    filename: str,
+) -> None:
+    from app.database import AsyncSessionLocal
+    from app.services.document_extractor_service import DocumentExtractorService
+
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await db.execute(
+                select(ExpenseDocument).where(ExpenseDocument.id == document_id)
+            )
+            doc = result.scalar_one_or_none()
+            if not doc:
+                return
+            extractor = DocumentExtractorService()
+            doc.extracted_data = extractor.extract(file_path, filename)
+            await db.commit()
+            logger.info("document_extraction_completed", document_id=str(document_id))
+        except Exception as e:
+            logger.error("document_extraction_failed", document_id=str(document_id), error=str(e))
 
 
 async def _get_expense_or_404(expense_id: uuid.UUID, db: AsyncSession) -> ExpenseItem:

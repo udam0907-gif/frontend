@@ -7,6 +7,7 @@ from app.models.audit import AuditLog
 from app.models.vendor import Vendor  # noqa: F401
 from app.models.company_setting import CompanySetting  # noqa: F401
 from app.models import legal  # noqa: F401
+from app.models.vendor_pool import CompanyVendorTemplate, VendorTemplatePool  # noqa: F401
 
 __all__ = [
     "Project",
@@ -23,4 +24,6 @@ __all__ = [
     "Vendor",
     "CompanySetting",
     "legal",
+    "VendorTemplatePool",
+    "CompanyVendorTemplate",
 ]

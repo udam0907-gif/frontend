@@ -28,6 +28,7 @@ class Template(Base, TimestampMixin):
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[str] = mapped_column(String(50), nullable=False, default="1.0.0")
     field_map: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    file_format: Mapped[str] = mapped_column(String(10), nullable=False, server_default="docx")
     # field_map: 기존 flat 구조 — 렌더링 엔진이 현재 사용
     #   {"field_key": {"label": "...", "type": "...", "cell": "B4", ...}}
     layout_map: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)

@@ -24,7 +24,6 @@ class CompanySettingUpsert(BaseModel):
     phone: str | None = None
     fax: str | None = None
     email: str | None = None
-    default_manager_name: str | None = None
     seal_image_path: str | None = None
     company_business_registration_path: str | None = None
     company_bank_copy_path: str | None = None
@@ -46,7 +45,6 @@ class CompanySettingRead(BaseModel):
     phone: str | None = None
     fax: str | None = None
     email: str | None = None
-    default_manager_name: str | None = None
     seal_image_path: str | None = None
     company_business_registration_path: str | None = None
     company_bank_copy_path: str | None = None

@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { formatCurrency } from "@/lib/utils";
+import { ProjectCalendar } from "@/components/project/ProjectCalendar";
 
 export default function ProjectDashboardPage() {
   const params = useParams();
@@ -244,6 +245,14 @@ export default function ProjectDashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Calendar */}
+      {project && (
+        <ProjectCalendar
+          project={project}
+          expenses={expenses ?? []}
+        />
+      )}
 
       {/* Budget breakdown */}
       {(project?.budget_categories ?? []).length > 0 && (

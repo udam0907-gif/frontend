@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -43,8 +43,8 @@ _STATUS_FIELD_MAP: dict[str, str] = {
 _ALLOWED_EXTENSIONS: dict[str, set[str]] = {
     "business_registration": {".pdf", ".jpg", ".jpeg", ".png"},
     "bank_copy": {".pdf", ".jpg", ".jpeg", ".png"},
-    "quote_template": {".docx"},
-    "transaction_statement_template": {".docx"},
+    "quote_template": {".docx", ".xlsx", ".xls", ".pdf"},
+    "transaction_statement_template": {".docx", ".xlsx", ".xls", ".pdf"},
     "seal_image": {".jpg", ".jpeg", ".png"},
 }
 
@@ -93,7 +93,6 @@ def _serialize_company_setting(company_setting: CompanySetting) -> CompanySettin
         phone=company_setting.phone,
         fax=company_setting.fax,
         email=company_setting.email,
-        default_manager_name=company_setting.default_manager_name,
         seal_image_path=company_setting.seal_image_path,
         company_business_registration_path=company_setting.company_business_registration_path,
         company_bank_copy_path=company_setting.company_bank_copy_path,
@@ -210,6 +209,22 @@ async def delete_company_file(
         resolved_path.unlink()
 
     setattr(company_setting, field_name, None)
+
+    # 파일 삭제 시 해당 소스에서 추출된 필드도 함께 초기화
+    _FILE_TYPE_OWNED_FIELDS: dict[str, list[str]] = {
+        "business_registration": [
+            "company_name", "company_registration_number", "representative_name",
+            "address", "business_type", "business_item",
+        ],
+        "quote_template": ["phone", "fax", "email"],
+        "transaction_statement_template": ["phone", "fax", "email"],
+        "bank_copy": [],
+        "seal_image": [],
+    }
+    for field in _FILE_TYPE_OWNED_FIELDS.get(file_type, []):
+        setattr(company_setting, field, None)
+
+    company_setting.updated_at = datetime.now(timezone.utc)
     await db.flush()
     await db.refresh(company_setting)
 
@@ -245,6 +260,46 @@ async def extract_company_settings_from_files(
         company_setting,
         preferred_sources=preferred_sources,
     )
+
+    # 추출된 필드를 company_settings 테이블에 저장
+    extracted = result["extracted"]
+    fields_to_clear: list[str] = result.get("fields_to_clear", [])
+
+    update_fields: dict[str, str] = {}
+    for field in (
+        "company_name",
+        "company_registration_number",
+        "representative_name",
+        "address",
+        "business_type",
+        "business_item",
+        "phone",
+        "fax",
+        "email",
+    ):
+        value = extracted.get(field)
+        if value and isinstance(value, str) and value.strip():
+            update_fields[field] = value.strip()
+
+    needs_save = bool(update_fields) or bool(fields_to_clear)
+    if needs_save:
+        # 추출된 값 저장
+        for key, value in update_fields.items():
+            setattr(company_setting, key, value)
+        # 이전 소스 잔재 필드 클리어 (예: 견적서 전화번호 → 사업자등록증 재업로드 시 삭제)
+        for field in fields_to_clear:
+            if field not in update_fields:  # 이번에 새로 추출된 값은 덮어쓰지 않음
+                setattr(company_setting, field, None)
+        company_setting.updated_at = datetime.now(timezone.utc)
+        await db.flush()
+        await db.refresh(company_setting)
+        logger.info(
+            "company_setting_extracted_and_saved",
+            company_id=company_id,
+            saved_fields=list(update_fields.keys()),
+            cleared_fields=fields_to_clear,
+        )
+
     return CompanySettingExtractResponse(
         company_id=company_id,
         extracted=CompanySettingExtractedFields(**result["extracted"]),

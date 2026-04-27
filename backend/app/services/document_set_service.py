@@ -22,6 +22,8 @@ Document Set Service — 비목별 문서세트 자동 생성 엔진
 
 from __future__ import annotations
 
+import math
+import random
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -53,6 +55,7 @@ DOCUMENT_SETS: dict[CategoryType, list[DocumentType]] = {
     CategoryType.materials: [
         DocumentType.quote,
         DocumentType.comparative_quote,
+        DocumentType.transaction_statement,
         DocumentType.expense_resolution,
         DocumentType.inspection_confirmation,
         DocumentType.vendor_business_registration,
@@ -99,8 +102,8 @@ VENDOR_TEMPLATE_DOCS: dict[DocumentType, str] = {
 # 비교견적서: 비교견적업체의 quote_template_path 사용
 COMPARATIVE_DOC = DocumentType.comparative_quote
 
-# 비교견적 금액 배율
-COMPARATIVE_MULTIPLIER = Decimal("1.1")
+# 비교견적 금액 배율 → 랜덤 배율(1.1~1.5)로 대체
+# COMPARATIVE_MULTIPLIER = Decimal("1.1")
 
 # CategoryType → 지출결의서 체크박스 레이블 매핑
 _CATEGORY_LABEL: dict[str, str] = {
@@ -408,11 +411,45 @@ class DocumentSetService:
         field_map = db_template.field_map if db_template else {}
         render_profile = db_template.render_profile if db_template else None
 
+        # XLSX 업체 템플릿이면 cell_map 자동 분석
+        ext = Path(file_path).suffix.lower()
+        if ext in (".xlsx", ".xls") and not field_map.get("_cell_map"):
+            try:
+                from app.services.llm_service import get_llm_service
+                from app.services.xlsx_cell_mapper import XlsxCellMapper
+                mapper = XlsxCellMapper(get_llm_service())
+                remap_result = await mapper.analyze(file_path)
+                cell_map = remap_result.get("cell_map", {})
+                if cell_map:
+                    field_map = dict(field_map)
+                    field_map["_cell_map"] = cell_map
+                    field_map["_mapping_status"] = "mapped"
+                    logger.info(
+                        "vendor_xlsx_auto_remapped",
+                        vendor_id=str(vendor.id),
+                        file_path=file_path,
+                        cell_count=len(cell_map),
+                    )
+            except Exception as remap_err:
+                logger.warning(
+                    "vendor_xlsx_auto_remap_failed",
+                    vendor_id=str(vendor.id),
+                    error=str(remap_err),
+                )
+
+        # vendor 상세 정보를 context에 보강
+        enriched_context = dict(context)
+        enriched_context.setdefault("supplier_name", vendor.name)
+        enriched_context.setdefault("vendor_name", vendor.name)
+        enriched_context.setdefault("company_name", vendor.name)
+        enriched_context.setdefault("vendor_business_number", vendor.business_number or "")
+        enriched_context.setdefault("vendor_contact", vendor.contact or "")
+
         return await self._render_from_template(
             doc_type=doc_type,
             template_path=file_path,
             field_map=field_map,
-            context=context,
+            context=enriched_context,
             project_data=project_data,
             expense=expense,
             template_id=f"vendor_{vendor.id}",
@@ -451,13 +488,23 @@ class DocumentSetService:
                 is_vendor_doc=True,
             )
 
-        # 비교견적 금액: meta의 compare_amount 우선, 없으면 × 1.1
+        # 비교견적 금액: meta의 compare_amount 우선, 없으면 1.1~1.5 랜덤 배율 × 100원 단위 올림
         meta = expense.metadata_ or {}
         if "compare_amount" in meta:
             compare_amount = int(meta["compare_amount"])
+            _random_rate = Decimal("1.1")  # note 출력용 기본값
         else:
             original = Decimal(str(expense.amount))
-            compare_amount = int((original * COMPARATIVE_MULTIPLIER).quantize(Decimal("1")))
+            _random_rate = Decimal(str(round(random.uniform(1.10, 1.50), 2)))
+            _raw_amount = int((original * _random_rate).quantize(Decimal("1")))
+            compare_amount = math.ceil(_raw_amount / 100) * 100
+            logger.info(
+                "comparative_amount_calculated",
+                original=int(original),
+                rate=str(_random_rate),
+                raw=_raw_amount,
+                rounded=compare_amount,
+            )
 
         context = dict(base_context)
         quantity = Decimal(str(context.get("quantity") or 1))
@@ -501,7 +548,8 @@ class DocumentSetService:
         context["compare_vendor_registration"] = compare_vendor.business_number or ""
         context["compare_vendor_contact"] = compare_vendor.contact or ""
         context["comparative_note"] = (
-            f"비교견적 ({compare_vendor.name} · 원견적 {int(expense.amount):,}원 기준 10% 인상)"
+            f"비교견적 ({compare_vendor.name} · 원견적 {int(expense.amount):,}원 기준 "
+            f"{int((_random_rate - 1) * 100)}% 인상)"
         )
 
         # quote 문서 유형의 DB field_map / render_profile 을 비교견적서에도 적용
@@ -513,6 +561,32 @@ class DocumentSetService:
         )
         field_map = db_template.field_map if db_template else {}
         render_profile = db_template.render_profile if db_template else None
+
+        # XLSX 비교견적서 템플릿이면 cell_map 자동 분석
+        ext = Path(file_path).suffix.lower()
+        if ext in (".xlsx", ".xls") and not field_map.get("_cell_map"):
+            try:
+                from app.services.llm_service import get_llm_service
+                from app.services.xlsx_cell_mapper import XlsxCellMapper
+                mapper = XlsxCellMapper(get_llm_service())
+                remap_result = await mapper.analyze(file_path)
+                cell_map = remap_result.get("cell_map", {})
+                if cell_map:
+                    field_map = dict(field_map)
+                    field_map["_cell_map"] = cell_map
+                    field_map["_mapping_status"] = "mapped"
+                    logger.info(
+                        "compare_vendor_xlsx_auto_remapped",
+                        vendor_id=str(compare_vendor.id),
+                        file_path=file_path,
+                        cell_count=len(cell_map),
+                    )
+            except Exception as remap_err:
+                logger.warning(
+                    "compare_vendor_xlsx_auto_remap_failed",
+                    vendor_id=str(compare_vendor.id),
+                    error=str(remap_err),
+                )
 
         return await self._render_from_template(
             doc_type=COMPARATIVE_DOC,
@@ -548,6 +622,31 @@ class DocumentSetService:
         render_profile: dict[str, Any] | None = None,
     ) -> DocSetItem:
         try:
+            _ext = Path(template_path).suffix.lower()
+            if _ext in (".xlsx", ".xls") and not field_map.get("_cell_map"):
+                try:
+                    from app.services.llm_service import get_llm_service
+                    from app.services.xlsx_cell_mapper import XlsxCellMapper
+                    _mapper = XlsxCellMapper(get_llm_service())
+                    _remap_result = await _mapper.analyze(template_path)
+                    _cell_map = _remap_result.get("cell_map", {})
+                    if _cell_map:
+                        field_map = dict(field_map)
+                        field_map["_cell_map"] = _cell_map
+                        field_map["_mapping_status"] = "mapped"
+                        logger.info(
+                            "render_from_template_xlsx_auto_remapped",
+                            template_path=template_path,
+                            template_id=template_id,
+                            cell_count=len(_cell_map),
+                        )
+                except Exception as _remap_err:
+                    logger.warning(
+                        "render_from_template_xlsx_auto_remap_failed",
+                        template_path=template_path,
+                        error=str(_remap_err),
+                    )
+
             gen_result = await generator.generate(
                 template_path=template_path,
                 field_map=field_map,
@@ -691,8 +790,15 @@ class DocumentSetService:
             ctx.setdefault("our_company_email", company_setting.email or "")
             ctx.setdefault("our_company_manager_name", manager_name)
 
-            # 회사 설정 값은 보존하되, 문서 출력에서는 vendor_name을 우선 수신처로 사용한다.
-            ctx.setdefault("recipient_name", vendor_name or company_setting.company_name or "")
+            # 수신자(귀중/귀하) — 우리 회사명으로 강제 설정 (setdefault는 빈 문자열을 유지하므로 강제 할당)
+            our_company = company_setting.company_name or ""
+            if our_company:
+                ctx["recipient_name"] = our_company
+                ctx["recipient"] = our_company
+                ctx["귀하"] = our_company
+                ctx["귀중"] = our_company
+                ctx["수신처"] = our_company
+                ctx["our_company_name"] = our_company
             ctx.setdefault("recipient_registration_number", expense.vendor_registration_number or "")
             ctx.setdefault("recipient_address", "")
             ctx.setdefault("recipient_business_type", "")
@@ -722,6 +828,24 @@ class DocumentSetService:
         if inspection_images:
             ctx["inspection_image_path"] = inspection_images[-1].file_path
         ctx.setdefault("recipient_display_name", f"{vendor_name} 귀하" if vendor_name else "")
+
+        # vendor 정보가 context에 없으면 expense의 vendor_name으로 보완
+        if not ctx.get("supplier_name") and expense.vendor_name:
+            ctx.setdefault("supplier_name", expense.vendor_name)
+        if not ctx.get("vendor_name") and expense.vendor_name:
+            ctx.setdefault("vendor_name", expense.vendor_name)
+        if not ctx.get("company_name") and expense.vendor_name:
+            ctx.setdefault("company_name", expense.vendor_name)
+
+        # company_setting이 없는 경우 our_company_name fallback으로 recipient_name 보완
+        if not ctx.get("recipient_name") and ctx.get("our_company_name"):
+            our = ctx["our_company_name"]
+            ctx["recipient_name"] = our
+            ctx["recipient"] = our
+            ctx["귀하"] = our
+            ctx["귀중"] = our
+            ctx["수신처"] = our
+
         return ctx
 
     async def _resolve_inspection_image_path(

@@ -40,6 +40,7 @@ export interface Project {
   status: ProjectStatus;
   agreement_file_path: string | null;
   plan_file_path: string | null;
+  metadata_: Record<string, unknown>;
   budget_categories: BudgetCategory[];
   created_at: string;
 }
@@ -374,6 +375,60 @@ export interface DocumentSetResponse {
   items: DocSetItem[];
 }
 
+// ─── Project Researcher ──────────────────────────────────────────────────────
+
+export interface ProjectResearcher {
+  id: string;
+  project_id: string;
+  personnel_type: "기존" | "신규";
+  name: string;
+  position: string | null;
+  annual_salary: number | null;
+  monthly_salary: number | null;
+  participation_months: number | null;
+  participation_rate: number | null;
+  cash_amount: number | null;
+  in_kind_amount: number | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearcherCreate {
+  personnel_type: "기존" | "신규";
+  name: string;
+  position?: string | null;
+  annual_salary?: number | null;
+  monthly_salary?: number | null;
+  participation_months?: number | null;
+  participation_rate?: number | null;
+  cash_amount?: number | null;
+  in_kind_amount?: number | null;
+  sort_order?: number;
+}
+
+export interface ExtractedBudgetCategory {
+  category_type: CategoryType;
+  allocated_amount: number;
+}
+
+export interface ExtractedProjectData {
+  name: string | null;
+  code: string | null;
+  institution: string | null;
+  principal_investigator: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  total_budget: number | null;
+  budget_categories: ExtractedBudgetCategory[];
+  researchers: ResearcherCreate[];
+  overview: string | null;
+  deliverables: string | null;
+  schedule: string | null;
+  doc_type: string;
+  confidence: number;
+}
+
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 export interface ApiError {
@@ -415,7 +470,6 @@ export interface CompanySettings {
   phone: string | null;
   fax: string | null;
   email: string | null;
-  default_manager_name: string | null;
   seal_image_path: string | null;
   company_business_registration_path: string | null;
   company_bank_copy_path: string | null;
@@ -437,7 +491,6 @@ export interface CompanySettingsUpdate {
   phone?: string;
   fax?: string;
   email?: string;
-  default_manager_name?: string;
   seal_image_path?: string;
   company_business_registration_path?: string;
   company_bank_copy_path?: string;

@@ -16,10 +16,14 @@ from app.models.project import BudgetCategory, Project
 from app.models.enums import ProjectStatus
 from app.schemas.project import (
     BudgetCategoryCreate,
+    ExtractedProjectData,
     ProjectCreate,
     ProjectRead,
     ProjectSummary,
     ProjectUpdate,
+    ResearcherCreate,
+    ResearcherRead,
+    ResearcherUpdate,
 )
 
 router = APIRouter(tags=["projects"])
@@ -181,6 +185,183 @@ async def get_project_stats(
         "expense_counts_by_status": counts,
         "total_expenses": sum(counts.values()),
     }
+
+
+@router.post("/extract-pdf", response_model=ExtractedProjectData)
+async def extract_pdf(
+    file: UploadFile = File(...),
+    doc_type: str = "auto",
+) -> ExtractedProjectData:
+    """PDF 파일에서 프로젝트 정보를 Claude AI로 추출한다.
+
+    doc_type (쿼리 파라미터):
+      - "auto"       : 자동 감지 (기본값, 권장)
+      - "plan"       : 사업계획서
+      - "agreement"  : 협약체결확약서
+      - "researcher" : 참여연구원현황표
+    """
+    if doc_type not in ("auto", "plan", "agreement", "researcher"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="doc_type은 'auto', 'plan', 'agreement', 'researcher' 중 하나여야 합니다.",
+        )
+
+    filename = file.filename or "upload.pdf"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext != "pdf":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="PDF 파일만 업로드 가능합니다.",
+        )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="빈 파일입니다.",
+        )
+
+    from app.services.project_extractor import extract_project_data
+
+    try:
+        raw = await extract_project_data(content, filename, doc_type)
+    except Exception as exc:
+        logger.error("project_pdf_extract_error", filename=filename, error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"PDF 추출 중 오류가 발생했습니다: {exc}",
+        ) from exc
+
+    return ExtractedProjectData(**raw)
+
+
+# ---------------------------------------------------------------------------
+# 참여연구원 CRUD
+# ---------------------------------------------------------------------------
+
+@router.get("/{project_id}/researchers", response_model=list[ResearcherRead])
+async def list_researchers(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> list:
+    from app.models.project import ProjectResearcher
+    from sqlalchemy import select
+
+    await _get_project_or_404(project_id, db)
+    result = await db.execute(
+        select(ProjectResearcher)
+        .where(ProjectResearcher.project_id == project_id)
+        .order_by(ProjectResearcher.sort_order)
+    )
+    return list(result.scalars().all())
+
+
+@router.post(
+    "/{project_id}/researchers",
+    response_model=list[ResearcherRead],
+    status_code=status.HTTP_201_CREATED,
+)
+async def upsert_researchers(
+    project_id: uuid.UUID,
+    payload: list[ResearcherCreate],
+    db: AsyncSession = Depends(get_db),
+) -> list:
+    """참여연구원 목록을 전체 교체한다 (기존 목록 삭제 후 재삽입)."""
+    from app.models.project import ProjectResearcher
+    from sqlalchemy import delete, select
+
+    await _get_project_or_404(project_id, db)
+
+    # 기존 삭제
+    await db.execute(
+        delete(ProjectResearcher).where(ProjectResearcher.project_id == project_id)
+    )
+
+    # 재삽입
+    new_rows = []
+    for idx, item in enumerate(payload):
+        row = ProjectResearcher(
+            id=uuid.uuid4(),
+            project_id=project_id,
+            personnel_type=item.personnel_type,
+            name=item.name,
+            position=item.position,
+            annual_salary=item.annual_salary,
+            monthly_salary=item.monthly_salary,
+            participation_months=item.participation_months,
+            participation_rate=item.participation_rate,
+            cash_amount=item.cash_amount,
+            in_kind_amount=item.in_kind_amount,
+            sort_order=item.sort_order if item.sort_order is not None else idx,
+        )
+        db.add(row)
+        new_rows.append(row)
+
+    await db.flush()
+    for row in new_rows:
+        await db.refresh(row)
+
+    logger.info(
+        "researchers_upserted",
+        project_id=str(project_id),
+        count=len(new_rows),
+    )
+    return new_rows
+
+
+@router.patch("/{project_id}/researchers/{researcher_id}", response_model=ResearcherRead)
+async def update_researcher(
+    project_id: uuid.UUID,
+    researcher_id: uuid.UUID,
+    payload: ResearcherUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> object:
+    from app.models.project import ProjectResearcher
+    from sqlalchemy import select
+
+    await _get_project_or_404(project_id, db)
+    result = await db.execute(
+        select(ProjectResearcher).where(
+            ProjectResearcher.id == researcher_id,
+            ProjectResearcher.project_id == project_id,
+        )
+    )
+    researcher = result.scalar_one_or_none()
+    if not researcher:
+        raise HTTPException(status_code=404, detail="연구원을 찾을 수 없습니다.")
+
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(researcher, field, value)
+
+    await db.flush()
+    await db.refresh(researcher)
+    return researcher
+
+
+@router.delete(
+    "/{project_id}/researchers/{researcher_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
+async def delete_researcher(
+    project_id: uuid.UUID,
+    researcher_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    from app.models.project import ProjectResearcher
+    from sqlalchemy import select
+
+    await _get_project_or_404(project_id, db)
+    result = await db.execute(
+        select(ProjectResearcher).where(
+            ProjectResearcher.id == researcher_id,
+            ProjectResearcher.project_id == project_id,
+        )
+    )
+    researcher = result.scalar_one_or_none()
+    if not researcher:
+        raise HTTPException(status_code=404, detail="연구원을 찾을 수 없습니다.")
+    await db.delete(researcher)
 
 
 async def _get_project_or_404(project_id: uuid.UUID, db: AsyncSession) -> Project:

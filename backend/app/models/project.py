@@ -9,6 +9,7 @@ from sqlalchemy import (
     Date,
     Enum,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     Text,
@@ -55,6 +56,10 @@ class Project(Base, TimestampMixin):
     expense_items: Mapped[list] = relationship(
         "ExpenseItem", back_populates="project", cascade="all, delete-orphan"
     )
+    researchers: Mapped[list[ProjectResearcher]] = relationship(
+        "ProjectResearcher", back_populates="project", cascade="all, delete-orphan",
+        order_by="ProjectResearcher.sort_order",
+    )
 
     __table_args__ = (
         CheckConstraint("period_end > period_start", name="ck_project_period"),
@@ -90,3 +95,41 @@ class BudgetCategory(Base, TimestampMixin):
         CheckConstraint("allocated_amount >= 0", name="ck_budget_allocated_non_negative"),
         CheckConstraint("spent_amount >= 0", name="ck_budget_spent_non_negative"),
     )
+
+
+class ProjectResearcher(Base, TimestampMixin):
+    __tablename__ = "project_researchers"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    personnel_type: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="기존"
+    )  # "기존" | "신규"
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    position: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    annual_salary: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=18, scale=2), nullable=True
+    )  # 연봉 (천원)
+    monthly_salary: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=18, scale=2), nullable=True
+    )  # 월급여 (천원)
+    participation_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    participation_rate: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=5, scale=2), nullable=True
+    )  # 참여율 (%)
+    cash_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=18, scale=2), nullable=True
+    )  # 현금 합계 (천원)
+    in_kind_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=18, scale=2), nullable=True
+    )  # 현물 합계 (천원)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    project: Mapped[Project] = relationship("Project", back_populates="researchers")

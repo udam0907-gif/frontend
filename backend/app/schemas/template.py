@@ -32,6 +32,7 @@ class TemplateUpdate(BaseModel):
     is_active: bool | None = None
     field_map: dict[str, Any] | None = None
     layout_map: dict[str, Any] | None = None
+    render_profile: dict[str, Any] | None = None
 
 
 class TemplateRead(BaseModel):
@@ -43,6 +44,7 @@ class TemplateRead(BaseModel):
     document_type: DocumentType
     filename: str
     file_path: str
+    file_format: str
     version: str
     field_map: dict[str, Any]
     layout_map: dict[str, Any] | None = None

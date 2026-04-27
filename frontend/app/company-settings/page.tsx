@@ -26,7 +26,6 @@ const emptyForm: CompanySettingsUpdate = {
   phone: "",
   fax: "",
   email: "",
-  default_manager_name: "",
   seal_image_path: "",
 };
 
@@ -51,6 +50,27 @@ const autoExtractFieldLabels: Record<keyof CompanySettingsExtractedFields, strin
 };
 
 const autoExtractFields = Object.keys(autoExtractFieldLabels) as Array<keyof CompanySettingsExtractedFields>;
+const extractableFileTypes: CompanySettingsUploadType[] = [
+  "business_registration",
+  "quote_template",
+  "transaction_statement_template",
+];
+const businessRegistrationFields: Array<keyof CompanySettingsExtractedFields> = [
+  "company_name",
+  "company_registration_number",
+  "representative_name",
+  "address",
+  "business_type",
+  "business_item",
+];
+const contactFields: Array<keyof CompanySettingsExtractedFields> = ["phone", "fax", "email"];
+const uploadExtractFields: Partial<
+  Record<CompanySettingsUploadType, Array<keyof CompanySettingsExtractedFields>>
+> = {
+  business_registration: businessRegistrationFields,
+  quote_template: contactFields,
+  transaction_statement_template: contactFields,
+};
 
 type UploadStage =
   | "idle"
@@ -128,31 +148,40 @@ function formatDateTime(value: string | null | undefined) {
   }).format(date);
 }
 
-function clearAutoExtractFields(base: CompanySettingsUpdate): CompanySettingsUpdate {
+function looksBrokenText(value: string | null | undefined) {
+  if (!value) return false;
+  return /Ã|Â|�/.test(value);
+}
+
+function clearExtractFields(
+  base: CompanySettingsUpdate,
+  fields: Array<keyof CompanySettingsExtractedFields> = autoExtractFields
+): CompanySettingsUpdate {
   const next = { ...base };
-  for (const field of autoExtractFields) {
+  for (const field of fields) {
     next[field] = "";
   }
   return next;
 }
 
+function clearAutoExtractFields(base: CompanySettingsUpdate): CompanySettingsUpdate {
+  return clearExtractFields(base);
+}
+
 function applyExtractedFields(
   base: CompanySettingsUpdate,
-  extracted: CompanySettingsExtractedFields
+  extracted: CompanySettingsExtractedFields,
+  fields: Array<keyof CompanySettingsExtractedFields> = autoExtractFields
 ): { nextForm: CompanySettingsUpdate; filledLabels: string[] } {
-  const nextForm = clearAutoExtractFields(base);
+  const nextForm = clearExtractFields(base, fields);
   const filledLabels: string[] = [];
 
-  for (const field of autoExtractFields) {
+  for (const field of fields) {
     const candidate = extracted[field];
     if (candidate && typeof candidate === "string") {
       nextForm[field] = candidate;
       filledLabels.push(autoExtractFieldLabels[field]);
     }
-  }
-
-  if (!String(base.default_manager_name ?? "").trim() && String(nextForm.representative_name ?? "").trim()) {
-    nextForm.default_manager_name = nextForm.representative_name;
   }
 
   return { nextForm, filledLabels };
@@ -167,7 +196,7 @@ export default function CompanySettingsPage() {
   const [fileUiState, setFileUiState] = useState<Record<CompanySettingsUploadType, FileUploadUiState>>(
     initialFileUiState
   );
-  const [hasInitializedFromFiles, setHasInitializedFromFiles] = useState(false);
+  const [hasInitializedFromFiles, setHasInitializedFromFiles] = useState(true);
   const fileInputRefs = useRef<Partial<Record<CompanySettingsUploadType, HTMLInputElement | null>>>({});
 
   const { data, isLoading } = useQuery({
@@ -180,7 +209,15 @@ export default function CompanySettingsPage() {
     setForm((prev) => ({
       ...prev,
       company_id: data.company_id || DEFAULT_COMPANY_ID,
-      default_manager_name: data.default_manager_name ?? "",
+      company_name: data.company_name ?? "",
+      company_registration_number: data.company_registration_number ?? "",
+      representative_name: data.representative_name ?? "",
+      address: data.address ?? "",
+      business_type: data.business_type ?? "",
+      business_item: data.business_item ?? "",
+      phone: data.phone ?? "",
+      fax: data.fax ?? "",
+      email: data.email ?? "",
       seal_image_path: data.seal_image_path ?? "",
       company_business_registration_path: data.company_business_registration_path ?? "",
       company_bank_copy_path: data.company_bank_copy_path ?? "",
@@ -215,9 +252,9 @@ export default function CompanySettingsPage() {
   }, [data]);
 
   useEffect(() => {
-    if (!data || hasInitializedFromFiles) return;
+    if (!data || true) return;
 
-    const hasUploadedFiles = (Object.keys(fileLabels) as CompanySettingsUploadType[]).some(
+    const hasUploadedFiles = extractableFileTypes.some(
       (fileType) => !!data.file_statuses?.[fileType]?.exists
     );
 
@@ -303,7 +340,22 @@ export default function CompanySettingsPage() {
       }));
 
       try {
-        setForm((prev) => clearAutoExtractFields(prev));
+        if (!extractableFileTypes.includes(fileType)) {
+          setFileUiState((prev) => ({
+            ...prev,
+            [fileType]: {
+              fileName: file.name,
+              stage: "uploaded",
+              message: "?낅줈???꾨즺. ???뚯씪??湲곕낯?뺣낫 ?먮룞 異붿텧 ??곸씠 ?꾨땲?묐땲??",
+              error: null,
+            },
+          }));
+          setMessage({ type: "success", text: `${fileLabels[fileType]} ?낅줈?쒓? ?꾨즺?섏뿀?듬땲??` });
+          return;
+        }
+
+        const targetFields = uploadExtractFields[fileType] ?? autoExtractFields;
+        setForm((prev) => clearExtractFields(prev, targetFields));
         setAutoFilledFields([]);
         setFileUiState((prev) => ({
           ...prev,
@@ -315,10 +367,10 @@ export default function CompanySettingsPage() {
           },
         }));
         const extraction = await companySettingsApi.extract(DEFAULT_COMPANY_ID);
-        const { filledLabels } = applyExtractedFields(form, extraction.extracted);
+        const { filledLabels } = applyExtractedFields(form, extraction.extracted, targetFields);
 
         setForm((prev) => {
-          const { nextForm } = applyExtractedFields(prev, extraction.extracted);
+          const { nextForm } = applyExtractedFields(prev, extraction.extracted, targetFields);
           return nextForm;
         });
         setAutoFilledFields(filledLabels);
@@ -425,23 +477,8 @@ export default function CompanySettingsPage() {
     },
   });
 
-  const registrationState = useMemo(
-    () => [
-      { label: "사업자등록증", fileType: "business_registration" as const, registered: !!data?.file_statuses?.business_registration?.exists },
-      { label: "통장사본", fileType: "bank_copy" as const, registered: !!data?.file_statuses?.bank_copy?.exists },
-      { label: "견적서 양식", fileType: "quote_template" as const, registered: !!data?.file_statuses?.quote_template?.exists },
-      {
-        label: "거래명세서 양식",
-        fileType: "transaction_statement_template" as const,
-        registered: !!data?.file_statuses?.transaction_statement_template?.exists,
-      },
-      { label: "직인 이미지", fileType: "seal_image" as const, registered: !!data?.file_statuses?.seal_image?.exists },
-    ],
-    [data]
-  );
-
   const handleSave = () => {
-    saveMutation.mutate(form);
+    saveMutation.mutate({ ...form });
   };
 
   const handleUpload = (fileType: CompanySettingsUploadType, file: File) => {
@@ -518,7 +555,8 @@ export default function CompanySettingsPage() {
                 </span>
               )}
             </div>
-            <Input id="company_name" value={form.company_name ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, company_name: e.target.value }))} />
+            <Input id="company_name" value={form.company_name ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, company_name: e.target.value }))} placeholder="예: 주식회사 씨엠" />
+            <p className="text-xs text-gray-400">견적서·거래명세서의 귀중/귀하 란에 표시됩니다.</p>
           </div>
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
@@ -541,10 +579,6 @@ export default function CompanySettingsPage() {
               )}
             </div>
             <Input id="representative_name" value={form.representative_name ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, representative_name: e.target.value }))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="default_manager_name">기본 담당자</Label>
-            <Input id="default_manager_name" value={form.default_manager_name ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, default_manager_name: e.target.value }))} />
           </div>
           <div className="space-y-1.5 sm:col-span-2">
             <div className="flex items-center gap-2">
@@ -625,36 +659,6 @@ export default function CompanySettingsPage() {
           <CardTitle className="text-base">회사 기본 서류</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {registrationState.map((item) => (
-              <div key={item.label} className="rounded-lg border border-gray-200 px-4 py-3 flex items-center justify-between">
-                <div className="space-y-1">
-                  <span className="block text-sm text-gray-700">{item.label}</span>
-                  {data?.file_statuses?.[item.fileType]?.exists && data.file_statuses[item.fileType].file_name && (
-                    <span className="block text-xs font-medium text-gray-600">
-                      {data.file_statuses[item.fileType].file_name}
-                    </span>
-                  )}
-                  {data?.file_statuses?.[item.fileType]?.exists && data.file_statuses[item.fileType].updated_at && (
-                    <span className="block text-[11px] text-gray-400">
-                      마지막 변경: {formatDateTime(data.file_statuses[item.fileType].updated_at)}
-                    </span>
-                  )}
-                  {!data?.file_statuses?.[item.fileType]?.exists && (
-                    <span className="block text-xs text-gray-400">현재 저장된 파일 없음</span>
-                  )}
-                </div>
-                <span
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                    item.registered ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"
-                  }`}
-                >
-                  {item.registered ? "등록됨" : "미등록"}
-                </span>
-              </div>
-            ))}
-          </div>
-
           {(Object.keys(fileLabels) as CompanySettingsUploadType[]).map((fileType) => (
             <div key={fileType} className="space-y-1.5">
               {(() => {
@@ -691,7 +695,7 @@ export default function CompanySettingsPage() {
                   }}
                   id={fileType}
                   type="file"
-                  accept={fileType === "quote_template" || fileType === "transaction_statement_template" ? ".docx" : ".pdf,.jpg,.jpeg,.png"}
+                  accept={fileType === "quote_template" || fileType === "transaction_statement_template" ? ".docx,.xlsx,.xls,.pdf" : ".pdf,.jpg,.jpeg,.png"}
                   className="hidden"
                   onChange={(e) => {
                     handleFileSelected(fileType, e.target.files?.[0] ?? null);
@@ -705,7 +709,7 @@ export default function CompanySettingsPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {fileType === "quote_template" || fileType === "transaction_statement_template"
-                        ? "DOCX 파일 업로드 가능"
+                        ? "DOCX, XLSX, XLS, PDF 파일 업로드 가능"
                         : "PDF, JPG, JPEG, PNG 파일 업로드 가능"}
                     </p>
                     <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -745,19 +749,10 @@ export default function CompanySettingsPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    {savedStatus?.exists && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => handleDelete(fileType)}
-                        disabled={uploadMutation.isPending || deleteMutation.isPending}
-                      >
-                        삭제
-                      </Button>
-                    )}
                     <Button
                       type="button"
                       variant="outline"
+                      className="hidden"
                       onClick={() => {
                         setFileUiState((prev) => ({
                           ...prev,
@@ -772,7 +767,15 @@ export default function CompanySettingsPage() {
                       }}
                       disabled={uploadMutation.isPending || deleteMutation.isPending}
                     >
-                      파일 선택
+                      수정
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => handleDelete(fileType)}
+                      disabled={uploadMutation.isPending || deleteMutation.isPending}
+                    >
+                      삭제
                     </Button>
                   </div>
                 </div>

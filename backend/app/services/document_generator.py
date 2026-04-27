@@ -40,6 +40,7 @@ from app.schemas.docx_schemas import (
     DOCX_SCHEMAS,
 )
 from app.services.llm_service import LLMService
+from app.services.xlsx_document_filler import XlsxDocumentFiller
 
 logger = get_logger(__name__)
 
@@ -111,6 +112,10 @@ class DocumentGenerator:
             if layout_map:
                 return self._generate_xlsx_layout(
                     template_path, layout_map, user_values, project_data, expense_item_id, template_id
+                )
+            if field_map.get("_cell_map"):
+                return self._generate_xlsx_cell_map(
+                    template_path, field_map, user_values, project_data, expense_item_id, template_id
                 )
             return await self._generate_xlsx(
                 template_path, field_map, user_values, project_data, expense_item_id, template_id
@@ -404,6 +409,101 @@ class DocumentGenerator:
         config: dict[str, Any],
     ) -> None:
         """고정 테이블 좌표 기반 채움 (standard_table 전략)."""
+        custom_table_idx = config.get("table_idx")
+        custom_field_positions = config.get("field_positions") or {}
+        custom_line_items = config.get("line_items") or {}
+        custom_summary_positions = config.get("summary_positions") or {}
+
+        if custom_table_idx is not None and (
+            custom_field_positions or custom_line_items or custom_summary_positions
+        ):
+            if len(doc.tables) <= custom_table_idx:
+                return
+
+            table = doc.tables[custom_table_idx]
+
+            def _stringify(value: Any, position: dict[str, Any] | None = None) -> str:
+                if value in (None, ""):
+                    return ""
+                fmt = (position or {}).get("format")
+                if fmt == "amount":
+                    value = self._format_doc_amount(value)
+                elif fmt == "raw_amount":
+                    value = str(value)
+                else:
+                    value = str(value)
+                prefix = (position or {}).get("prefix", "")
+                suffix = (position or {}).get("suffix", "")
+                return f"{prefix}{value}{suffix}"
+
+            def _item_value(item: dict[str, Any], key: str) -> Any:
+                if key == "seq":
+                    return ""
+                if key == "item_name_spec":
+                    parts = [
+                        str(item.get("item_name") or "").strip(),
+                        str(item.get("spec") or "").strip(),
+                    ]
+                    return " / ".join(part for part in parts if part)
+                return item.get(key, "")
+
+            def _write_position(position: dict[str, Any], value: Any) -> None:
+                row_idx = position.get("row")
+                col_idx = position.get("col")
+                if row_idx is None or col_idx is None:
+                    return
+                if row_idx >= len(table.rows) or col_idx >= len(table.rows[row_idx].cells):
+                    return
+                self._set_cell_text(table.rows[row_idx].cells[col_idx], _stringify(value, position))
+
+            for field_key, positions in custom_field_positions.items():
+                source_key = field_key
+                if field_key == "recipient_display_name":
+                    source_key = "recipient_display_name"
+                value = ctx.get(source_key, "")
+                position_list = positions if isinstance(positions, list) else [positions]
+                for position in position_list:
+                    _write_position(position or {}, value)
+
+            if custom_line_items:
+                row_start = custom_line_items.get("row_start", 0)
+                max_rows = custom_line_items.get("max_rows", 1)
+                columns = custom_line_items.get("columns") or {}
+                clear_rows = custom_line_items.get("clear_rows", max_rows)
+                items: list[dict[str, Any]] = ctx.get("line_items") or []
+
+                for row_idx in range(row_start, min(row_start + clear_rows, len(table.rows))):
+                    for col_idx in columns.values():
+                        if col_idx < len(table.rows[row_idx].cells):
+                            self._set_cell_text(table.rows[row_idx].cells[col_idx], "")
+
+                for idx, item in enumerate(items[:max_rows], start=0):
+                    target_row = row_start + idx
+                    if target_row >= len(table.rows):
+                        break
+                    for key, col_idx in columns.items():
+                        if col_idx >= len(table.rows[target_row].cells):
+                            continue
+                        if key == "seq":
+                            value = str(idx + 1)
+                        else:
+                            value = _item_value(item, key)
+                            if key in {"unit_price", "amount"}:
+                                value = self._format_doc_amount(value)
+                        self._set_cell_text(table.rows[target_row].cells[col_idx], value)
+
+            summary_values = {
+                "subtotal": ctx.get("subtotal") or ctx.get("total_amount") or ctx.get("amount") or 0,
+                "vat": ctx.get("vat") or 0,
+                "total_amount": ctx.get("total_amount") or ctx.get("amount") or 0,
+            }
+            for field_key, positions in custom_summary_positions.items():
+                value = summary_values.get(field_key, ctx.get(field_key, ""))
+                position_list = positions if isinstance(positions, list) else [positions]
+                for position in position_list:
+                    _write_position(position or {}, value)
+            return
+
         h_idx = config.get("header_table_idx", 0)
         b_idx = config.get("body_table_idx", 1)
         if len(doc.tables) <= max(h_idx, b_idx):
@@ -1001,6 +1101,57 @@ class DocumentGenerator:
             return output_path
         except Exception as e:
             raise DocumentGenerationError(f"DOCX 렌더링 실패: {e}") from e
+
+    # ─── XLSX cell_map 렌더러 (vendor_pool 자동 분석 결과 기반) ──────────────
+
+    def _generate_xlsx_cell_map(
+        self,
+        template_path: str,
+        field_map: dict[str, Any],
+        user_values: dict[str, Any],
+        project_data: dict[str, Any],
+        expense_item_id: str,
+        template_id: str,
+    ) -> dict[str, Any]:
+        """vendor_template_pool _cell_map 기반 XLSX 채움."""
+        mapping_status = field_map.get("_mapping_status", "unknown")
+
+        if mapping_status == "mapping_required" or not field_map.get("_cell_map"):
+            raise DocumentGenerationError(
+                "XLSX 셀 매핑이 완료되지 않았습니다. "
+                "업체 템플릿을 다시 업로드하거나 /remap을 실행하세요."
+            )
+
+        context: dict[str, Any] = {**project_data, **user_values}
+
+        filler = XlsxDocumentFiller()
+        output_path = filler.fill(
+            template_path=template_path,
+            field_map=field_map,
+            context=context,
+            expense_item_id=expense_item_id,
+        )
+
+        trace = {
+            "template_path": template_path,
+            "template_id": template_id,
+            "file_format": Path(template_path).suffix.lstrip("."),
+            "renderer": "xlsx_cell_map",
+            "render_mode": "excel_rendered",
+            "mapping_status": mapping_status,
+            "model_version": self._llm._model,
+            "prompt_version": "xlsx-cell-mapper-1.0",
+            "fields_filled": list(context.keys()),
+            "validation_passed": True,
+        }
+
+        logger.info(
+            "xlsx_document_generated",
+            expense_item_id=expense_item_id,
+            output_path=output_path,
+        )
+
+        return {"output_path": output_path, "render_mode": "excel_rendered", "generation_trace": trace}
 
     # ─── XLSX layout_map 렌더러 ────────────────────────────────────────────
 

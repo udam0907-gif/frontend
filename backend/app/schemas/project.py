@@ -90,3 +90,68 @@ class ProjectSummary(BaseModel):
     period_start: date
     period_end: date
     total_budget: Decimal
+
+
+# ---------------------------------------------------------------------------
+# 참여연구원 스키마
+# ---------------------------------------------------------------------------
+
+class ResearcherCreate(BaseModel):
+    personnel_type: str = Field(default="기존", pattern="^(기존|신규)$")
+    name: str = Field(min_length=1, max_length=100)
+    position: str | None = Field(None, max_length=100)
+    annual_salary: Decimal | None = Field(None, ge=0)
+    monthly_salary: Decimal | None = Field(None, ge=0)
+    participation_months: int | None = Field(None, ge=0, le=60)
+    participation_rate: Decimal | None = Field(None, ge=0, le=100)
+    cash_amount: Decimal | None = Field(None, ge=0)
+    in_kind_amount: Decimal | None = Field(None, ge=0)
+    sort_order: int = 0
+
+
+class ResearcherRead(ResearcherCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class ResearcherUpdate(BaseModel):
+    personnel_type: str | None = Field(None, pattern="^(기존|신규)$")
+    name: str | None = Field(None, min_length=1, max_length=100)
+    position: str | None = None
+    annual_salary: Decimal | None = None
+    monthly_salary: Decimal | None = None
+    participation_months: int | None = Field(None, ge=0, le=60)
+    participation_rate: Decimal | None = Field(None, ge=0, le=100)
+    cash_amount: Decimal | None = None
+    in_kind_amount: Decimal | None = None
+    sort_order: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# PDF 추출 스키마
+# ---------------------------------------------------------------------------
+
+class ExtractedBudgetCategory(BaseModel):
+    category_type: str
+    allocated_amount: Decimal
+
+
+class ExtractedProjectData(BaseModel):
+    name: str | None = None
+    code: str | None = None
+    institution: str | None = None
+    principal_investigator: str | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    total_budget: Decimal | None = None
+    budget_categories: list[ExtractedBudgetCategory] = []
+    researchers: list[ResearcherCreate] = []
+    overview: str | None = None
+    deliverables: str | None = None
+    schedule: str | None = None
+    doc_type: str
+    confidence: float = 0.0

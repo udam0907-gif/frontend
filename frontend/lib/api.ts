@@ -2,6 +2,9 @@ import axios, { AxiosError } from "axios";
 import type {
   Project,
   ProjectCreate,
+  ProjectResearcher,
+  ResearcherCreate,
+  ExtractedProjectData,
   Template,
   ExpenseItem,
   ExpenseCreate,
@@ -55,6 +58,9 @@ export const projectsApi = {
   create: (data: ProjectCreate) =>
     apiClient.post<Project>("/projects", data).then((r) => r.data),
 
+  update: (id: string, data: Partial<Pick<ProjectCreate, "name" | "institution" | "principal_investigator" | "period_start" | "period_end" | "total_budget" | "status"> & { metadata?: Record<string, unknown> }>) =>
+    apiClient.patch<Project>(`/projects/${id}`, data).then((r) => r.data),
+
   uploadFile: (id: string, type: "agreement" | "plan", file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -64,6 +70,26 @@ export const projectsApi = {
       })
       .then((r) => r.data);
   },
+
+  extractPdf: (docType: "auto" | "plan" | "agreement" | "researcher", file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return apiClient
+      .post<ExtractedProjectData>(`/projects/extract-pdf?doc_type=${docType}`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
+      .then((r) => r.data);
+  },
+
+  listResearchers: (projectId: string) =>
+    apiClient
+      .get<ProjectResearcher[]>(`/projects/${projectId}/researchers`)
+      .then((r) => r.data),
+
+  upsertResearchers: (projectId: string, researchers: ResearcherCreate[]) =>
+    apiClient
+      .post<ProjectResearcher[]>(`/projects/${projectId}/researchers`, researchers)
+      .then((r) => r.data),
 };
 
 // ─── Templates ───────────────────────────────────────────────────────────────

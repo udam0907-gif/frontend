@@ -34,6 +34,7 @@ class ProjectCreate(BaseModel):
     period_end: date
     total_budget: Decimal = Field(gt=0)
     status: ProjectStatus = ProjectStatus.active
+    budget_categories: list[BudgetCategoryCreate] = Field(default_factory=list)
     metadata_: dict[str, Any] = Field(default_factory=dict, alias="metadata")
 
     @field_validator("period_end")
@@ -153,5 +154,13 @@ class ExtractedProjectData(BaseModel):
     overview: str | None = None
     deliverables: str | None = None
     schedule: str | None = None
+    # 사업계획서 주요내용 (자동 저장 → metadata.business_plan)
+    project_summary: str | None = None
+    research_goals: list[str] = []
+    expected_outcomes: list[str] = []
+    key_technologies: list[str] = []
+    budget_breakdown_notes: str | None = None
+    performance_indicators: list[str] = []
+    schedule_items: list[dict[str, Any]] = []
     doc_type: str
     confidence: float = 0.0

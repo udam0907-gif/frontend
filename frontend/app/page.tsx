@@ -28,6 +28,7 @@ import {
   Plus,
 } from "lucide-react";
 import Link from "next/link";
+import { fmt } from "@/lib/utils";
 
 const STATUS_COLOR: Record<string, string> = {
   active: "bg-green-100 text-green-700",
@@ -59,7 +60,7 @@ function StatCard({
           {loading ? (
             <Skeleton className="h-7 w-12 mt-1" />
           ) : (
-            <p className="text-2xl font-bold text-gray-900">{value ?? 0}</p>
+            <p className="text-2xl font-bold text-gray-900">{fmt(value ?? 0)}</p>
           )}
         </div>
       </CardContent>
@@ -243,7 +244,7 @@ export default function AllDashboardPage() {
                 {projLoading ? (
                   <Skeleton className="h-5 w-8" />
                 ) : (
-                  <span className="font-bold text-gray-900">{activeProjects}건</span>
+                  <span className="font-bold text-gray-900">{fmt(activeProjects)}건</span>
                 )}
               </div>
               <div className="flex items-center justify-between">
@@ -254,7 +255,7 @@ export default function AllDashboardPage() {
                 {expLoading ? (
                   <Skeleton className="h-5 w-8" />
                 ) : (
-                  <span className="font-bold text-gray-900">{thisMonthExpenses}건</span>
+                  <span className="font-bold text-gray-900">{fmt(thisMonthExpenses)}건</span>
                 )}
               </div>
               <div className="flex items-center justify-between">
@@ -265,7 +266,7 @@ export default function AllDashboardPage() {
                 {expLoading ? (
                   <Skeleton className="h-5 w-8" />
                 ) : (
-                  <span className="font-bold text-gray-900">{exportedExpenses}건</span>
+                  <span className="font-bold text-gray-900">{fmt(exportedExpenses)}건</span>
                 )}
               </div>
             </CardContent>

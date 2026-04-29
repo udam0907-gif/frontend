@@ -281,9 +281,9 @@ export interface VendorExtractResult {
 }
 
 export const vendorsApi = {
-  list: (projectId: string) =>
+  list: (projectId?: string) =>
     apiClient
-      .get<Vendor[]>("/vendors", { params: { project_id: projectId } })
+      .get<Vendor[]>("/vendors", { params: projectId ? { project_id: projectId } : {} })
       .then((r) => r.data),
 
   create: (data: VendorCreate) =>

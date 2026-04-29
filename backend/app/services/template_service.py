@@ -35,7 +35,7 @@ class TemplateService:
     def validate_file(self, filename: str, content: bytes) -> None:
         if not validate_file_extension(filename, ALLOWED_TEMPLATE_EXTENSIONS):
             raise TemplateError(
-                f"템플릿 파일은 .docx / .xlsx / .xls 형식만 허용됩니다. 업로드된 파일: {filename}"
+                f"템플릿 파일은 .docx / .xlsx / .xls / .pdf / .jpg / .jpeg / .png 형식만 허용됩니다. 업로드된 파일: {filename}"
             )
         if len(content) > 20 * 1024 * 1024:
             raise TemplateError("템플릿 파일 크기는 20MB를 초과할 수 없습니다.")
@@ -56,6 +56,8 @@ class TemplateService:
             return self._extract_docx_placeholders(file_path)
         elif ext in (".xlsx", ".xls"):
             return self._extract_xlsx_placeholders(file_path)
+        elif ext in (".pdf", ".jpg", ".jpeg", ".png"):
+            return {}
         else:
             raise TemplateError(f"지원하지 않는 템플릿 확장자: {ext}")
 

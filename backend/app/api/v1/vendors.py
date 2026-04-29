@@ -71,14 +71,19 @@ async def extract_vendor_info_from_file(
 
 @router.get("/", response_model=list[VendorRead])
 async def list_vendors(
-    project_id: uuid.UUID,
+    project_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[Vendor]:
-    result = await db.execute(
-        select(Vendor)
-        .where(Vendor.project_id == project_id)
-        .order_by(Vendor.created_at.desc())
-    )
+    from sqlalchemy import or_
+    stmt = select(Vendor)
+    if project_id is not None:
+        # 전역(project_id=null) + 해당 과제 업체 모두 반환
+        stmt = stmt.where(or_(Vendor.project_id == None, Vendor.project_id == project_id))
+    else:
+        # 전역 업체만
+        stmt = stmt.where(Vendor.project_id == None)
+    stmt = stmt.order_by(Vendor.created_at.desc())
+    result = await db.execute(stmt)
     return list(result.scalars().all())
 
 
@@ -89,7 +94,7 @@ async def create_vendor(
 ) -> Vendor:
     vendor = Vendor(
         id=uuid.uuid4(),
-        project_id=payload.project_id,
+        project_id=payload.project_id,  # None이면 전역 업체
         name=payload.name,
         vendor_category=payload.vendor_category,
         business_number=payload.business_number,

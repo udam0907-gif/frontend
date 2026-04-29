@@ -11,7 +11,7 @@ VendorCategory = Literal["매입처", "매출처"]
 
 
 class VendorCreate(BaseModel):
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None
     name: str = Field(min_length=1, max_length=255)
     vendor_category: VendorCategory
     business_number: str = Field(min_length=1, max_length=20)
@@ -22,7 +22,7 @@ class VendorRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None
     name: str
     vendor_category: str
     business_number: str

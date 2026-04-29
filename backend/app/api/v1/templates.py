@@ -74,6 +74,14 @@ async def upload_template(
             "fill_strategy": "placeholder",
             "output_format": "docx",
         }
+    elif ext in (".pdf", ".jpg", ".jpeg", ".png"):
+        file_format = ext.lstrip(".")
+        render_profile = {
+            "engine": "passthrough",
+            "preserve_formatting": True,
+            "fill_strategy": "passthrough_copy",
+            "output_format": file_format,
+        }
     else:
         file_format = ext.lstrip(".")
         render_profile = {

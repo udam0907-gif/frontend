@@ -178,6 +178,8 @@ function TemplateCard({
     (v) => (v as FieldMapEntry)?.cell
   ).length;
 
+  const isPassthrough = /\.(pdf|jpg|jpeg|png)$/i.test(tmpl.filename);
+
   return (
     <Card className={tmpl.is_active ? "" : "opacity-50"}>
       <CardContent className="p-0">
@@ -188,7 +190,9 @@ function TemplateCard({
               <p className="text-sm font-medium text-gray-800">{tmpl.display_name}</p>
               <Badge className="text-xs bg-gray-100 text-gray-600">{CATEGORY_LABELS[tmpl.category_type]}</Badge>
               <Badge className="text-xs bg-blue-50 text-blue-600">v{tmpl.version}</Badge>
-              {mappedCount > 0 ? (
+              {isPassthrough ? (
+                <Badge className="text-xs bg-purple-50 text-purple-600">첨부 파일</Badge>
+              ) : mappedCount > 0 ? (
                 <Badge className="text-xs bg-green-50 text-green-600">셀매핑 {mappedCount}개</Badge>
               ) : (
                 <Badge className="text-xs bg-amber-50 text-amber-600">매핑 미설정</Badge>
@@ -200,15 +204,17 @@ function TemplateCard({
           <div className="flex items-center gap-1 shrink-0">
             {tmpl.is_active && (
               <>
-                <Button
-                  variant="ghost" size="sm"
-                  className="text-gray-500 hover:text-blue-600 gap-1 text-xs h-7 px-2"
-                  onClick={() => setShowMapping((v) => !v)}
-                >
-                  <Settings2 className="w-3.5 h-3.5" />
-                  셀 매핑
-                  {showMapping ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                </Button>
+                {!isPassthrough && (
+                  <Button
+                    variant="ghost" size="sm"
+                    className="text-gray-500 hover:text-blue-600 gap-1 text-xs h-7 px-2"
+                    onClick={() => setShowMapping((v) => !v)}
+                  >
+                    <Settings2 className="w-3.5 h-3.5" />
+                    셀 매핑
+                    {showMapping ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  </Button>
+                )}
                 <Button
                   variant="ghost" size="sm"
                   className="text-red-400 hover:text-red-600 text-xs h-7 px-2"
@@ -264,7 +270,7 @@ export function TemplatesPanel() {
 
   return (
     <div className="space-y-5">
-      <p className="text-sm text-gray-500">XLSX 서식 파일을 업로드하고 필드별 셀 주소를 매핑하세요.</p>
+      <p className="text-sm text-gray-500">서식 파일을 업로드하세요. XLSX/XLS는 셀 매핑, DOCX는 플레이스홀더, PDF/JPG/PNG는 첨부 파일로 처리됩니다.</p>
 
       <div className="grid grid-cols-3 gap-5">
         <Card className="col-span-1">
@@ -303,16 +309,17 @@ export function TemplatesPanel() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>XLSX 파일 *</Label>
+              <Label>서식 파일 *</Label>
               <label className="block">
                 <input
                   type="file"
                   className="hidden"
-                  accept=".xlsx,.xls,.docx"
+                  accept=".xlsx,.xls,.docx,.pdf,.jpg,.jpeg,.png"
                   onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                 />
                 <div className="border-2 border-dashed border-gray-200 rounded-lg p-3 text-center cursor-pointer hover:border-blue-300 transition-colors">
-                  <p className="text-xs text-gray-400">{file ? file.name : "XLSX 파일 선택"}</p>
+                  <p className="text-xs text-gray-400">{file ? file.name : "파일 선택"}</p>
+                  <p className="text-xs text-gray-300 mt-0.5">XLSX · XLS · DOCX · PDF · JPG · PNG</p>
                 </div>
               </label>
             </div>

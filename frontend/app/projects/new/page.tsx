@@ -306,6 +306,18 @@ export default function NewProjectPage() {
         if (!merged.period_end && result.period_end) merged.period_end = result.period_end;
         if (!merged.total_budget && result.total_budget) merged.total_budget = result.total_budget;
 
+        // 사업계획서 주요내용: 먼저 추출된 값 우선
+        if (!merged.overview && result.overview) merged.overview = result.overview;
+        if (!merged.deliverables && result.deliverables) merged.deliverables = result.deliverables;
+        if (!merged.schedule && result.schedule) merged.schedule = result.schedule;
+        if (!merged.project_summary && result.project_summary) merged.project_summary = result.project_summary;
+        if (!merged.budget_breakdown_notes && result.budget_breakdown_notes) merged.budget_breakdown_notes = result.budget_breakdown_notes;
+        if (!(merged.research_goals?.length) && result.research_goals?.length) merged.research_goals = result.research_goals;
+        if (!(merged.expected_outcomes?.length) && result.expected_outcomes?.length) merged.expected_outcomes = result.expected_outcomes;
+        if (!(merged.key_technologies?.length) && result.key_technologies?.length) merged.key_technologies = result.key_technologies;
+        if (!(merged.performance_indicators?.length) && result.performance_indicators?.length) merged.performance_indicators = result.performance_indicators;
+        if (!(merged.schedule_items?.length) && result.schedule_items?.length) merged.schedule_items = result.schedule_items;
+
         // 비목: 새로 추출된 것 추가 (중복 category_type 제거)
         for (const b of result.budget_categories) {
           if (!allBudgets.find((x) => x.category_type === b.category_type)) {
@@ -542,9 +554,12 @@ export default function NewProjectPage() {
           {extractedResult && (() => {
             const hasAnyBusinessPlan =
               !!extractedResult.project_summary ||
+              !!extractedResult.overview ||
               (extractedResult.research_goals?.length ?? 0) > 0 ||
               (extractedResult.expected_outcomes?.length ?? 0) > 0 ||
               (extractedResult.key_technologies?.length ?? 0) > 0 ||
+              (extractedResult.performance_indicators?.length ?? 0) > 0 ||
+              (extractedResult.schedule_items?.length ?? 0) > 0 ||
               !!extractedResult.budget_breakdown_notes;
             return (
               <div className="mt-2">
@@ -568,11 +583,11 @@ export default function NewProjectPage() {
                       </p>
                     ) : (
                       <>
-                        {extractedResult.project_summary && (
+                        {(extractedResult.project_summary || extractedResult.overview) && (
                           <div>
-                            <p className="text-xs font-semibold text-blue-600 mb-1">연구 목적/배경</p>
+                            <p className="text-xs font-semibold text-blue-600 mb-1">연구 목적/개요</p>
                             <p className="leading-relaxed whitespace-pre-wrap">
-                              {extractedResult.project_summary}
+                              {extractedResult.project_summary || extractedResult.overview}
                             </p>
                           </div>
                         )}
@@ -594,6 +609,37 @@ export default function NewProjectPage() {
                                 <li key={i}>{o}</li>
                               ))}
                             </ul>
+                          </div>
+                        )}
+                        {(extractedResult.performance_indicators?.length ?? 0) > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-blue-600 mb-1">주요 성능지표</p>
+                            <ul className="list-disc pl-5 space-y-0.5">
+                              {extractedResult.performance_indicators.map((p, i) => (
+                                <li key={i}>{p}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {(extractedResult.schedule_items?.length ?? 0) > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-blue-600 mb-1">사업추진 일정</p>
+                            <table className="w-full text-xs border-collapse">
+                              <thead>
+                                <tr className="bg-blue-50">
+                                  <th className="border border-blue-100 px-2 py-1 text-left w-24">기간</th>
+                                  <th className="border border-blue-100 px-2 py-1 text-left">수행 내용</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {extractedResult.schedule_items.map((s, i) => (
+                                  <tr key={i} className="border-b border-blue-50">
+                                    <td className="border border-blue-100 px-2 py-1 text-gray-500 whitespace-nowrap">{s.period}</td>
+                                    <td className="border border-blue-100 px-2 py-1">{s.task}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
                           </div>
                         )}
                         {(extractedResult.key_technologies?.length ?? 0) > 0 && (

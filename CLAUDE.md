@@ -268,3 +268,47 @@ backend/app/services/
 | API 설계 | 09, 05, 10 |
 | 회사 설정 | 05, 08, 09 |
 | 모든 작업 공통 | 11, 12 |
+
+---
+
+## 🤖 서브에이전트 워크플로우
+
+이 프로젝트는 4개의 서브에이전트를 사용한다. 정의: `.claude/agents/`
+
+### 작업 흐름
+
+```
+사용자 지시
+    ↓
+[1] explorer    — 현재 코드 상태 파악 (읽기만)
+    ↓
+[2] implementer — 지시받은 부분만 수정
+    ↓
+[3] verifier    — 실제 실행해서 작동 검증
+    ↓ (실패 시 [2]로 회귀)
+[4] reviewer    — 범위 위반 / 사이드 이펙트 확인
+    ↓
+사용자에게 보고 (REPORT_TEMPLATE.md 양식)
+```
+
+### 에이전트별 역할
+
+| 에이전트 | 역할 | 도구 |
+|---------|------|------|
+| explorer | 읽기 전용 탐색 | Read, Grep, Glob, Bash(읽기만) |
+| implementer | 지시받은 것만 수정 | Read, Write, Edit, Bash |
+| verifier | 실제 실행 검증 (curl/docker) | Bash, Read, Grep |
+| reviewer | 범위·보호영역·사이드이펙트 검토 | Read, Grep, Bash |
+
+### 호출 패턴
+
+| 요청 | 사용할 에이전트 |
+|------|--------------|
+| "이 코드 어떻게 작동해?" | explorer |
+| "이거 수정해줘" | explorer → implementer → verifier → reviewer |
+| "버그 잡아줘" | explorer → implementer → verifier → reviewer |
+
+### 완료 기준
+- 상세: `DONE_CRITERIA.md`
+- 보고 양식: `REPORT_TEMPLATE.md`
+- 주간 사이클: `WORKFLOW.md`

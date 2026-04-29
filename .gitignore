@@ -35,7 +35,9 @@ figma-plugin-lifeasy/
 repo_clone/
 repo_frontend_github/
 design_images/
-.claude/
+# Claude Code — 개인 설정만 무시, 팀 공유 파일은 추적
+.claude/settings.local.json
+.claude/agent-memory/
 
 # ─── 기타 파일 ────────────────────────────────────────────────────────────
 *.pdf
@@ -47,6 +49,9 @@ design_images/
 !backend/README.md
 !frontend/README.md
 !skills/*.md
+!DONE_CRITERIA.md
+!REPORT_TEMPLATE.md
+!WORKFLOW.md
 carousel_lifeasy.html
 carousel-output.json
 fill_docx.py

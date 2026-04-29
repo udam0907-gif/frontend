@@ -282,6 +282,14 @@ async def _extract_with_llm(
         raw_json = raw_json.strip()
 
         data = json.loads(raw_json)
+        logger.info(
+            "llm_raw_business_plan_fields",
+            overview=str(data.get("overview", ""))[:100] or "EMPTY",
+            project_summary=str(data.get("project_summary", ""))[:100] or "EMPTY",
+            research_goals=data.get("research_goals", []),
+            performance_indicators=data.get("performance_indicators", []),
+            schedule_items_count=len(data.get("schedule_items") or []),
+        )
         return _parse_llm_response(data, doc_type_hint)
 
     except json.JSONDecodeError as e:
@@ -673,5 +681,12 @@ async def extract_project_data(
         doc_type=result["doc_type"],
         confidence=result["confidence"],
         name=result.get("name"),
+        has_overview=bool(result.get("overview")),
+        has_project_summary=bool(result.get("project_summary")),
+        research_goals_count=len(result.get("research_goals") or []),
+        expected_outcomes_count=len(result.get("expected_outcomes") or []),
+        key_technologies_count=len(result.get("key_technologies") or []),
+        performance_indicators_count=len(result.get("performance_indicators") or []),
+        schedule_items_count=len(result.get("schedule_items") or []),
     )
     return result

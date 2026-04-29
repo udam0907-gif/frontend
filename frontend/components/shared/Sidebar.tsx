@@ -14,6 +14,7 @@ import {
   Printer,
   Settings,
   AlertCircle,
+  DatabaseBackup,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +24,7 @@ const globalNavItems = [
   { href: "/expenses", label: "전체 집행 현황", icon: ReceiptText, exact: false },
   { href: "/company-settings", label: "회사 설정", icon: Settings, exact: false },
   { href: "/export", label: "전체 출력문서", icon: Download, exact: false },
+  { href: "/backup", label: "백업 관리", icon: DatabaseBackup, exact: false },
 ];
 
 const projectNavDefs = [

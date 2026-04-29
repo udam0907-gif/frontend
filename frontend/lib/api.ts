@@ -354,6 +354,30 @@ export const documentSetsApi = {
 // ─── Projects stats (aggregated on frontend from list) ───────────────────────
 // Dashboard uses projectsApi.list() + expensesApi.list() directly
 
+// ─── Backup ──────────────────────────────────────────────────────────────────
+
+export interface BackupFile {
+  name: string;
+  size_bytes: number;
+  size_label: string;
+  type_label: string;
+  suffix: string;
+  created_at: string;
+}
+
+export const backupApi = {
+  listFiles: () =>
+    apiClient.get<BackupFile[]>("/backup/files").then((r) => r.data),
+
+  getRestoreGuide: () =>
+    apiClient.get<{ content: string }>("/backup/restore-guide").then((r) => r.data),
+
+  downloadUrl: (filename: string) =>
+    `${BASE_URL}/api/v1/backup/download/${encodeURIComponent(filename)}`,
+};
+
+// ─── Company Settings ─────────────────────────────────────────────────────────
+
 export const companySettingsApi = {
   get: (companyId = "default") =>
     apiClient

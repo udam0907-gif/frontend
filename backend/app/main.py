@@ -56,7 +56,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 # Register routers
-from app.api.v1 import company_settings, projects, templates, expenses, documents, validation, export, rcms, legal as legal_router, vendors, vendor_pool  # noqa: E402
+from app.api.v1 import company_settings, projects, templates, expenses, documents, validation, export, rcms, legal as legal_router, vendors, vendor_pool, backup  # noqa: E402
 
 prefix = settings.api_v1_prefix
 app.include_router(projects.router, prefix=prefix + "/projects", tags=["프로젝트"])
@@ -70,6 +70,7 @@ app.include_router(rcms.router, prefix=prefix + "/rcms", tags=["RCMS Q&A"])
 app.include_router(legal_router.router, prefix=prefix + "/rcms", tags=["법령 자료"])
 app.include_router(vendors.router, prefix=prefix + "/vendors", tags=["업체"])
 app.include_router(vendor_pool.router, prefix=prefix + "/vendor-pool", tags=["업체 템플릿 풀"])
+app.include_router(backup.router, prefix=prefix + "/backup", tags=["백업"])
 
 
 @app.get("/health", tags=["헬스체크"])

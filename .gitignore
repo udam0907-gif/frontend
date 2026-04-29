@@ -3,6 +3,11 @@ backend/.env
 backend/.env.*
 !backend/.env.example
 
+# ─── 백업 데이터 파일 (대용량, git 제외) ─────────────────────────────────
+backend/backup/*.sql
+backend/backup/*.tar.gz
+backend/backup/*.gz
+
 # ─── Backend ──────────────────────────────────────────────────────────────
 backend/__pycache__/
 backend/**/__pycache__/

@@ -52,10 +52,18 @@ class ExtractedProjectData(TypedDict):
     total_budget: Decimal | None
     budget_categories: list[ExtractedBudgetCategory]
     researchers: list[ExtractedResearcher]
-    # 사업계획서 추가 항목
+    # 사업계획서 추가 항목 (overview/deliverables/schedule는 기존 자유 텍스트)
     overview: str | None                # 개요
     deliverables: str | None            # 결과물 및 주요 성능지표
     schedule: str | None                # 사업추진·기술개발 일정
+    # 사업계획서 주요내용 (구조화 — metadata.business_plan에 저장)
+    project_summary: str | None         # 연구 목적/배경 요약
+    research_goals: list[str]           # 연구 목표 bullets
+    expected_outcomes: list[str]        # 기대 성과 bullets
+    key_technologies: list[str]         # 핵심 기술 키워드
+    budget_breakdown_notes: str | None  # 연구비 편성 특이사항
+    performance_indicators: list[str]   # 주요 성능지표 (정량 목표)
+    schedule_items: list[dict]          # 사업추진 일정 [{period, task}]
     doc_type: str
     confidence: float
 
@@ -185,8 +193,19 @@ _USER_PROMPT_TEMPLATE = """\
   ],
   "overview": "사업 개요 또는 아이템 개요 (핵심 내용 300자 이내 요약, 없으면 null)",
   "deliverables": "결과물 및 주요 성능지표 내용 요약 (없으면 null)",
-  "schedule": "사업추진 일정 또는 기술개발 일정 요약 (없으면 null)"
+  "schedule": "사업추진 일정 또는 기술개발 일정 요약 (없으면 null)",
+  "project_summary": "연구 목적과 배경을 3~5문장으로 요약 (300자 이내, 없으면 null)",
+  "research_goals": ["연구 목표 항목들 (문자열 배열, 없으면 빈 배열 [])"],
+  "expected_outcomes": ["기대 성과 항목들 (문자열 배열, 없으면 빈 배열 [])"],
+  "key_technologies": ["핵심 기술/연구 내용 키워드 목록 (문자열 배열, 없으면 빈 배열 [])"],
+  "budget_breakdown_notes": "연구비 편성 관련 특이사항 (없으면 null)",
+  "performance_indicators": ["주요 성능지표/정량 목표 항목 (예: ['포름알데히드 제거율 70% 이상', '특허 출원 1건'], 없으면 빈 배열 [])"],
+  "schedule_items": [{{"period": "1분기", "task": "기초 연구"}}]
 }}
+
+【performance_indicators / schedule_items 추출 규칙】
+- performance_indicators: "주요 성능지표", "정량 목표", "결과물 및 주요 성능지표" 표/문장에서 측정 가능한 항목만 배열로 (없으면 [])
+- schedule_items: "사업추진 일정", "기술개발 일정", "추진계획" 표에서 분기/월 단위로 [{{"period": "1분기" 또는 "M+1", "task": "수행 내용"}}] 형식 (없으면 [])
 
 【날짜 추출 규칙 — 반드시 준수】
 - 출력 형식: 반드시 YYYY-MM-DD
@@ -263,6 +282,14 @@ async def _extract_with_llm(
         raw_json = raw_json.strip()
 
         data = json.loads(raw_json)
+        logger.info(
+            "llm_raw_business_plan_fields",
+            overview=str(data.get("overview", ""))[:100] or "EMPTY",
+            project_summary=str(data.get("project_summary", ""))[:100] or "EMPTY",
+            research_goals=data.get("research_goals", []),
+            performance_indicators=data.get("performance_indicators", []),
+            schedule_items_count=len(data.get("schedule_items") or []),
+        )
         return _parse_llm_response(data, doc_type_hint)
 
     except json.JSONDecodeError as e:
@@ -366,6 +393,36 @@ def _parse_llm_response(data: dict, doc_type_hint: str) -> ExtractedProjectData:
     deliverables = clean_text(data.get("deliverables"))
     schedule     = clean_text(data.get("schedule"))
 
+    # 사업계획서 주요내용 (구조화)
+    def clean_str_list(v: object) -> list[str]:
+        if not isinstance(v, list):
+            return []
+        out: list[str] = []
+        for item in v:
+            s = str(item or "").strip()
+            if s and s.lower() != "null":
+                out.append(s)
+        return out
+
+    project_summary       = clean_text(data.get("project_summary"))
+    research_goals        = clean_str_list(data.get("research_goals"))
+    expected_outcomes     = clean_str_list(data.get("expected_outcomes"))
+    key_technologies      = clean_str_list(data.get("key_technologies"))
+    budget_breakdown_notes = clean_text(data.get("budget_breakdown_notes"))
+    performance_indicators = clean_str_list(data.get("performance_indicators"))
+
+    # schedule_items: [{period, task}] 구조 검증
+    raw_schedule = data.get("schedule_items") or []
+    schedule_items: list[dict] = []
+    if isinstance(raw_schedule, list):
+        for item in raw_schedule:
+            if not isinstance(item, dict):
+                continue
+            period = str(item.get("period") or "").strip()
+            task = str(item.get("task") or "").strip()
+            if period or task:
+                schedule_items.append({"period": period, "task": task})
+
     # 신뢰도 계산
     key_fields = {
         "plan":       [data.get("name"), period_start, period_end, total_budget],
@@ -389,6 +446,13 @@ def _parse_llm_response(data: dict, doc_type_hint: str) -> ExtractedProjectData:
         overview=overview,
         deliverables=deliverables,
         schedule=schedule,
+        project_summary=project_summary,
+        research_goals=research_goals,
+        expected_outcomes=expected_outcomes,
+        key_technologies=key_technologies,
+        budget_breakdown_notes=budget_breakdown_notes,
+        performance_indicators=performance_indicators,
+        schedule_items=schedule_items,
         doc_type=doc_type,
         confidence=confidence,
     )
@@ -536,6 +600,13 @@ def _extract_regex_fallback(text: str, tables: list[list[list[str]]], doc_type: 
         overview=None,
         deliverables=None,
         schedule=None,
+        project_summary=None,
+        research_goals=[],
+        expected_outcomes=[],
+        key_technologies=[],
+        budget_breakdown_notes=None,
+        performance_indicators=[],
+        schedule_items=[],
         doc_type=doc_type,
         confidence=confidence,
     )
@@ -610,5 +681,12 @@ async def extract_project_data(
         doc_type=result["doc_type"],
         confidence=result["confidence"],
         name=result.get("name"),
+        has_overview=bool(result.get("overview")),
+        has_project_summary=bool(result.get("project_summary")),
+        research_goals_count=len(result.get("research_goals") or []),
+        expected_outcomes_count=len(result.get("expected_outcomes") or []),
+        key_technologies_count=len(result.get("key_technologies") or []),
+        performance_indicators_count=len(result.get("performance_indicators") or []),
+        schedule_items_count=len(result.get("schedule_items") or []),
     )
     return result

@@ -74,18 +74,29 @@ async def create_project(
     db.add(project)
     await db.flush()
 
-    # Create default budget categories
+    # Create budget categories — payload 값이 있으면 반영, 없으면 0
+    from decimal import Decimal as _Decimal
     from app.models.enums import CategoryType
+    budget_map = {
+        b.category_type: b.allocated_amount
+        for b in (payload.budget_categories or [])
+    }
     for cat in CategoryType:
         db.add(BudgetCategory(
             id=uuid.uuid4(),
             project_id=project.id,
             category_type=cat,
+            allocated_amount=budget_map.get(cat, _Decimal("0")),
         ))
 
     await db.flush()
     await db.refresh(project, ["budget_categories"])
-    logger.info("project_created", project_id=str(project.id), code=project.code)
+    logger.info(
+        "project_created",
+        project_id=str(project.id),
+        code=project.code,
+        budget_categories_count=len(budget_map),
+    )
     return project
 
 

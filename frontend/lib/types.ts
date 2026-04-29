@@ -426,8 +426,28 @@ export interface ExtractedProjectData {
   overview: string | null;
   deliverables: string | null;
   schedule: string | null;
+  // 사업계획서 주요내용 (자동 저장 → metadata.business_plan)
+  project_summary: string | null;
+  research_goals: string[];
+  expected_outcomes: string[];
+  key_technologies: string[];
+  budget_breakdown_notes: string | null;
+  performance_indicators: string[];
+  schedule_items: Array<{ period: string; task: string }>;
   doc_type: string;
   confidence: number;
+}
+
+export interface BusinessPlanMetadata {
+  project_summary: string | null;
+  research_goals: string[];
+  expected_outcomes: string[];
+  key_technologies: string[];
+  budget_breakdown_notes: string | null;
+  overview: string | null;
+  performance_indicators: string[];
+  schedule_items: Array<{ period: string; task: string }>;
+  extracted_at: string;
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────

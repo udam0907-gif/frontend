@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   FolderOpen,
-  FileText,
   ReceiptText,
   BookOpen,
   Download,
@@ -22,6 +21,7 @@ const globalNavItems = [
   { href: "/", label: "전체 과제 대시보드", icon: LayoutDashboard, exact: true },
   { href: "/projects", label: "과제 목록", icon: FolderOpen, exact: true },
   { href: "/expenses", label: "전체 집행 현황", icon: ReceiptText, exact: false },
+  { href: "/vendors", label: "업체 관리", icon: Building2, exact: false },
   { href: "/company-settings", label: "회사 설정", icon: Settings, exact: false },
   { href: "/export", label: "전체 출력문서", icon: Download, exact: false },
   { href: "/backup", label: "백업 관리", icon: DatabaseBackup, exact: false },
@@ -29,8 +29,6 @@ const globalNavItems = [
 
 const projectNavDefs = [
   { suffix: "", label: "과제 전용 대시보드", icon: LayoutDashboard, exact: true },
-  { suffix: "/templates", label: "템플릿 관리", icon: FileText, exact: false },
-  { suffix: "/vendors", label: "업체 관리", icon: Building2, exact: false },
   { suffix: "/expenses", label: "비용집행", icon: ReceiptText, exact: false },
   { suffix: "/details", label: "집행상세", icon: ClipboardList, exact: false },
   { suffix: "/docs", label: "문서 출력", icon: Printer, exact: false },

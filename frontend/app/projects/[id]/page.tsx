@@ -100,6 +100,29 @@ export default function ProjectDashboardPage() {
 
   const meta = project?.metadata_ ?? {};
   const hasContent = !!(meta.overview || meta.deliverables || meta.schedule);
+  const businessPlan = (meta.business_plan ?? null) as {
+    project_summary?: string | null;
+    research_goals?: string[];
+    expected_outcomes?: string[];
+    key_technologies?: string[];
+    budget_breakdown_notes?: string | null;
+    overview?: string | null;
+    performance_indicators?: string[];
+    schedule_items?: Array<{ period: string; task: string }>;
+    extracted_at?: string;
+  } | null;
+  const hasBusinessPlan = !!(
+    businessPlan && (
+      businessPlan.project_summary ||
+      businessPlan.overview ||
+      (businessPlan.research_goals?.length ?? 0) > 0 ||
+      (businessPlan.expected_outcomes?.length ?? 0) > 0 ||
+      (businessPlan.key_technologies?.length ?? 0) > 0 ||
+      (businessPlan.performance_indicators?.length ?? 0) > 0 ||
+      (businessPlan.schedule_items?.length ?? 0) > 0 ||
+      businessPlan.budget_breakdown_notes
+    )
+  );
 
   return (
     <div className="space-y-6">
@@ -246,6 +269,113 @@ export default function ProjectDashboardPage() {
                     </p>
                   </div>
                 )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 사업계획서 주요내용 (구조화 — business_plan) */}
+      {hasBusinessPlan && businessPlan && (
+        <Card className="border-blue-100">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2 text-blue-700">
+              <Sparkles className="w-4 h-4" />
+              사업계획서 주요내용
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm">
+            {businessPlan.project_summary && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-blue-600">연구 목적/배경</p>
+                <p className="text-gray-700 bg-blue-50/40 border border-blue-100 rounded-md px-3 py-2 leading-relaxed whitespace-pre-wrap">
+                  {businessPlan.project_summary}
+                </p>
+              </div>
+            )}
+            {businessPlan.overview && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-blue-600">연구 개요</p>
+                <p className="text-gray-700 bg-blue-50/40 border border-blue-100 rounded-md px-3 py-2 leading-relaxed whitespace-pre-wrap">
+                  {businessPlan.overview}
+                </p>
+              </div>
+            )}
+            {((businessPlan.research_goals?.length ?? 0) > 0 || (businessPlan.expected_outcomes?.length ?? 0) > 0) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {(businessPlan.research_goals?.length ?? 0) > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-blue-600">연구 목표</p>
+                    <ul className="list-disc pl-5 space-y-0.5 text-gray-700">
+                      {businessPlan.research_goals!.map((g, i) => (
+                        <li key={i}>{g}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {(businessPlan.expected_outcomes?.length ?? 0) > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-blue-600">기대 성과</p>
+                    <ul className="list-disc pl-5 space-y-0.5 text-gray-700">
+                      {businessPlan.expected_outcomes!.map((o, i) => (
+                        <li key={i}>{o}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+            {(businessPlan.key_technologies?.length ?? 0) > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-blue-600">핵심 기술</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {businessPlan.key_technologies!.map((t, i) => (
+                    <Badge key={i} variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                      {t}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            {(businessPlan.performance_indicators?.length ?? 0) > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-blue-600">주요 성능지표</p>
+                <ul className="list-disc pl-5 space-y-0.5 text-gray-700">
+                  {businessPlan.performance_indicators!.map((p, i) => (
+                    <li key={i}>{p}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {(businessPlan.schedule_items?.length ?? 0) > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-blue-600">사업추진 일정</p>
+                <div className="overflow-x-auto">
+                  <table className="text-xs border border-blue-100 rounded-md">
+                    <thead className="bg-blue-50">
+                      <tr>
+                        <th className="px-3 py-1.5 text-left text-blue-700 font-semibold border-r border-blue-100" style={{ width: 120 }}>기간</th>
+                        <th className="px-3 py-1.5 text-left text-blue-700 font-semibold">수행 내용</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {businessPlan.schedule_items!.map((s, i) => (
+                        <tr key={i} className="border-t border-blue-100">
+                          <td className="px-3 py-1.5 text-gray-700 border-r border-blue-100 align-top">{s.period}</td>
+                          <td className="px-3 py-1.5 text-gray-700">{s.task}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {businessPlan.budget_breakdown_notes && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-blue-600">연구비 편성 특이사항</p>
+                <p className="text-gray-600 text-xs leading-relaxed whitespace-pre-wrap">
+                  {businessPlan.budget_breakdown_notes}
+                </p>
               </div>
             )}
           </CardContent>

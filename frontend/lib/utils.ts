@@ -11,3 +11,10 @@ export function formatCurrency(value: number | string | null | undefined): strin
   if (!Number.isFinite(numericValue)) return "0원";
   return `${Math.round(numericValue).toLocaleString("ko-KR")}원`;
 }
+
+export const fmt = (value: number | string | null | undefined): string => {
+  if (value == null || value === "") return "-";
+  const n = Number(value);
+  if (isNaN(n)) return String(value);
+  return n.toLocaleString("ko-KR");
+};

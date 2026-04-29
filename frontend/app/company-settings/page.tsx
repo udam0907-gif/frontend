@@ -1,17 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { companySettingsApi } from "@/lib/api";
+import { TemplatesPanel } from "@/components/company/TemplatesPanel";
 import type {
   CompanySettingsExtractedFields,
   CompanySettingsUpdate,
   CompanySettingsUploadType,
 } from "@/lib/types";
+
+type TabId = "info" | "templates";
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: "info", label: "회사 정보" },
+  { id: "templates", label: "템플릿 관리" },
+];
 
 const DEFAULT_COMPANY_ID = "default";
 
@@ -189,6 +197,7 @@ function applyExtractedFields(
 
 export default function CompanySettingsPage() {
   const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<TabId>("info");
   const [form, setForm] = useState<CompanySettingsUpdate>(emptyForm);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [autoFilledFields, setAutoFilledFields] = useState<string[]>([]);
@@ -521,9 +530,36 @@ export default function CompanySettingsPage() {
       <div>
         <h2 className="text-xl font-bold text-gray-900">회사 설정</h2>
         <p className="text-sm text-gray-500 mt-0.5">
-          문서 출력에 사용할 회사 기본 정보와 기본 서류를 관리합니다.
+          문서 출력에 사용할 회사 기본 정보, 기본 서류, 템플릿을 관리합니다.
         </p>
       </div>
+
+      {/* 탭 네비게이션 */}
+      <div className="border-b border-gray-200">
+        <nav className="-mb-px flex gap-6">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab.id
+                  ? "border-blue-600 text-blue-700"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {/* 템플릿 관리 탭 */}
+      {activeTab === "templates" && <TemplatesPanel />}
+
+      {/* 회사 정보 탭 */}
+      {activeTab === "info" && (
+      <div className="space-y-6">
 
       {message && (
         <div
@@ -787,6 +823,8 @@ export default function CompanySettingsPage() {
           ))}
         </CardContent>
       </Card>
+      </div>
+      )}
     </div>
   );
 }

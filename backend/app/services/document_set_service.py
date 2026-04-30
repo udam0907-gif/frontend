@@ -681,6 +681,7 @@ class DocumentSetService:
         vendor_name = expense.vendor_name or ""
         ctx: dict[str, Any] = {
             "expense_date":       expense.expense_date or "",
+            "issue_date":         expense.expense_date or "",
             "vendor_name":        vendor_name,
             "vendor_registration":expense.vendor_registration_number or "",
             "amount":             int(expense.amount),

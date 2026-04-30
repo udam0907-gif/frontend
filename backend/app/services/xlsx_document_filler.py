@@ -82,6 +82,13 @@ class XlsxDocumentFiller:
     FIELD_ALIASES: dict[str, list[str]] = {
         # 수신자/귀하
         "recipient_name": ["recipient_name", "recipient", "귀하", "수신처"],
+        # 공급받는자(우리 회사) 영역
+        "recipient_business_number": ["recipient_business_number", "our_company_registration_number"],
+        "recipient_company_name": ["recipient_company_name", "our_company_name"],
+        "recipient_representative": ["recipient_representative", "our_company_representative"],
+        "recipient_address": ["recipient_address", "our_company_address"],
+        "recipient_business_type": ["recipient_business_type", "our_company_business_type"],
+        "recipient_business_item": ["recipient_business_item", "our_company_business_item"],
         # 날짜
         "issue_date": ["issue_date", "execution_date", "expense_date", "작성일", "견적일"],
         # 품목명
@@ -96,6 +103,12 @@ class XlsxDocumentFiller:
         "amount": ["amount", "total"],
         # 총합계
         "total_amount": ["total_amount", "amount"],
+        # 공급가액 합계 (구 supply_amount 호환)
+        "total_supply": ["total_supply", "supply_amount"],
+        "supply_amount": ["supply_amount", "total_supply"],
+        # 세액 합계 (구 tax_amount 호환)
+        "total_tax": ["total_tax", "tax_amount"],
+        "tax_amount": ["tax_amount", "total_tax"],
         # 문서번호
         "doc_number": ["doc_number", "document_number"],
         # 업체명 (공급자)

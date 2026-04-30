@@ -74,7 +74,10 @@ async def list_vendors(
     project_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[Vendor]:
-    stmt = select(Vendor).where(Vendor.project_id == None).order_by(Vendor.created_at.desc())
+    stmt = select(Vendor)
+    if project_id is not None:
+        stmt = stmt.where(Vendor.project_id == project_id)
+    stmt = stmt.order_by(Vendor.created_at.desc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
 

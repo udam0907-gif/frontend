@@ -774,10 +774,13 @@ class DocumentSetService:
                 ctx["수신처"] = our_company
                 ctx["our_company_name"] = our_company
             ctx.setdefault("recipient_registration_number", expense.vendor_registration_number or "")
-            ctx.setdefault("recipient_address", "")
-            ctx.setdefault("recipient_business_type", "")
-            ctx.setdefault("recipient_business_item", "")
-            ctx.setdefault("recipient_representative", "")
+            # 공급받는자(우리 회사) 영역 — 견적서/거래명세서 recipient 셀에 채울 값
+            ctx.setdefault("recipient_business_number", company_setting.company_registration_number or "")
+            ctx.setdefault("recipient_company_name", company_setting.company_name or "")
+            ctx.setdefault("recipient_representative", company_setting.representative_name or "")
+            ctx.setdefault("recipient_address", company_setting.address or "")
+            ctx.setdefault("recipient_business_type", company_setting.business_type or "")
+            ctx.setdefault("recipient_business_item", company_setting.business_item or "")
             ctx.setdefault("recipient_contact", "")
 
             ctx.setdefault("buyer_name", vendor_name or "")

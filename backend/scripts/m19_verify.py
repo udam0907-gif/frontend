@@ -101,6 +101,57 @@ VENDOR_INFO_CHECKS: dict[str, tuple[str, str]] = {
 }
 
 
+# ── 회귀-3: 우리 회사 영역 / 라인아이템 / 합계 검증 ──────────────────────────────
+# 회사 설정에서 로드한 우리 회사 정보가 견적서 출력물에 반영됐는지 확인.
+# (스크립트 실행 시 DB에서 동적으로 로드)
+# recipient 영역 검증은 quote 문서에만 적용.
+
+def check_recipient_area(cell_values: list[str], company_biznum: str, company_name: str) -> list[tuple[str, bool, str]]:
+    """우리 회사 사업자번호·상호가 출력물 셀에 존재하는지 확인."""
+    all_text = " ".join(cell_values)
+    results = []
+    if company_biznum:
+        found = company_biznum.replace("-", "") in all_text.replace("-", "")
+        results.append((
+            "recipient_biznum_filled",
+            found,
+            "" if found else f"우리 회사 사업자번호 {company_biznum!r} 미입력",
+        ))
+    if company_name:
+        found = company_name in all_text
+        results.append((
+            "recipient_company_filled",
+            found,
+            "" if found else f"우리 회사명 {company_name!r} 미입력 (cell_map에 recipient_company_name 없거나 context 미전달)",
+        ))
+    return results
+
+
+def check_lineitem_count(cell_values: list[str], expected_count: int) -> tuple[str, bool, str]:
+    """입력한 라인아이템 수만큼 품목명이 셀에 존재하는지 확인 (최소 기준)."""
+    item_hits = sum(
+        1 for v in cell_values
+        if "tio2" in v.lower() or "티타늄" in v.lower() or "이산화" in v.lower()
+    )
+    passed = item_hits >= expected_count
+    return (
+        "lineitem_count_ge_expected",
+        passed,
+        "" if passed else f"품목 셀 {item_hits}개 < 기대 {expected_count}개",
+    )
+
+
+def check_total_amount(cell_values: list[str]) -> tuple[str, bool, str]:
+    """total_amount(6,750,000)이 출력물에 존재하는지 확인."""
+    all_text = " ".join(cell_values)
+    found = "6750000" in all_text or "6,750,000" in all_text
+    return (
+        "total_amount_filled",
+        found,
+        "" if found else "총합계 6,750,000 셀에 미입력",
+    )
+
+
 # ── 결과 수집 ──────────────────────────────────────────────────────────────────
 
 class Results:
@@ -246,7 +297,8 @@ async def main() -> bool:
             select(CompanySetting).where(CompanySetting.company_id == "default")
         )).scalar_one_or_none()
         our_company_name = cs.company_name if cs else ""
-        print(f"  우리 회사명: {our_company_name!r}")
+        our_company_biznum = cs.company_registration_number if cs else ""
+        print(f"  우리 회사명: {our_company_name!r}  사업자번호: {our_company_biznum!r}")
 
     if not vendor_rows:
         print("  ❌ Global vendor 없음 — 검증 불가")
@@ -468,6 +520,24 @@ async def main() -> bool:
                             name_part in all_text,
                             "" if name_part in all_text else f"회사명 {name_part!r} 소실",
                         )
+
+                    # 우리 회사(공급받는자) 영역 검증 (회귀-3 추가)
+                    if our_company_name or our_company_biznum:
+                        for chk_name, chk_pass, chk_detail in check_recipient_area(
+                            cell_values, our_company_biznum, our_company_name
+                        ):
+                            res.add(main_vendor.name, doc_type, chk_name, chk_pass, chk_detail)
+                    else:
+                        res.add(main_vendor.name, doc_type, "recipient_area_skip",
+                                True, "회사 설정 미입력 — 검증 생략")
+
+                    # 라인아이템 개수 검증 (회귀-3 추가)
+                    chk_name, chk_pass, chk_detail = check_lineitem_count(cell_values, 1)
+                    res.add(main_vendor.name, doc_type, chk_name, chk_pass, chk_detail)
+
+                    # 합계 금액 검증 (회귀-3 추가)
+                    chk_name, chk_pass, chk_detail = check_total_amount(cell_values)
+                    res.add(main_vendor.name, doc_type, chk_name, chk_pass, chk_detail)
 
                 # 블랙리스트 검증 (모든 XLSX 문서)
                 all_text = " ".join(cell_values)

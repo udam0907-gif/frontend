@@ -102,7 +102,8 @@ class XlsxDocumentFiller:
         "company_name": ["company_name", "supplier_name", "vendor_name"],
         # 사업자번호
         "registration_number": ["registration_number", "vendor_business_number",
-                                 "vendor_registration", "business_number"],
+                                 "vendor_registration", "business_number",
+                                 "vendor_business_no"],
         # 담당자/연락처
         "contact": ["contact", "vendor_contact"],
         # 예산항목

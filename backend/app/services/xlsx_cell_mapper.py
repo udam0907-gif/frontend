@@ -12,47 +12,19 @@ from app.services.llm_service import LLMService
 
 logger = get_logger(__name__)
 
-_SYSTEM_PROMPT = """당신은 한국 정부 R&D 과제용 엑셀 서식 분석 전문가입니다.
-주어진 엑셀 셀 구조를 분석하여 각 필드의 정확한 셀 위치를 찾아냅니다.
+_SYSTEM_PROMPT = """당신은 한국 정부 R&D 과제용 엑셀 견적서/거래명세서 서식 분석 전문가입니다.
+주어진 엑셀 셀 구조를 분석하여 각 필드의 정확한 셀 위치(좌표)를 찾아냅니다.
 
-반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요:
-{
-  "sheet_name": "시트명",
-  "supplier": {
-    "company_name": "B5",
-    "registration_number": "B6",
-    "representative": "B7",
-    "address": "B8",
-    "phone": "B9"
-  },
-  "buyer": {
-    "company_name": "E5",
-    "registration_number": "E6"
-  },
-  "document": {
-    "date": "F3",
-    "doc_number": "F2"
-  },
-  "items_table": {
-    "start_row": 14,
-    "end_row": 30,
-    "col_no": "A",
-    "col_name": "B",
-    "col_spec": "C",
-    "col_qty": "D",
-    "col_unit_price": "E",
-    "col_amount": "F"
-  },
-  "totals": {
-    "supply_amount": "F31",
-    "tax": "F32",
-    "total": "F33"
-  },
-  "notes": "특이사항 (병합셀, 특수구조 등)"
-}
-
-찾을 수 없는 필드는 null로 표시하세요.
-셀 주소는 반드시 "B5" 형식(열문자+행번호)으로 작성하세요."""
+[절대 원칙 — 반드시 준수]
+1. cell_map에 포함되지 않은 셀은 문서 생성 시 초기화되지 않아 이전 견적 데이터가 그대로 잔존하는 사고가 발생한다.
+   양식에 보이는 모든 의미 있는 데이터 입력 영역(공급자 정보, 수신처, 날짜, 품목, 합계, 담당자, 연락처 등)을
+   반드시 cell_map 키로 표현해야 한다. 이 영역이 의미 없어 보여도 cell_map에 키로 표현하지 않으면
+   이전 견적 데이터가 새는 사고가 발생한다.
+2. 아래 필수 필드에서 null 반환은 사고 직결이다 — 반드시 찾아야 한다:
+   recipient_name, issue_date(또는 issue_date_year/month/day), item_name,
+   quantity, unit_price, amount, total_amount, vendor_name, vendor_business_no
+3. 셀 주소는 반드시 "B5" 형식(열문자+행번호). 병합 셀은 반드시 좌상단(앵커) 셀 좌표로 표현.
+4. 순수 JSON만 반환. 다른 텍스트 절대 불가."""
 
 
 class XlsxCellMapper:
@@ -97,51 +69,68 @@ class XlsxCellMapper:
                 f"다음은 한국 기업의 견적서/거래명세서 XLSX 파일의 셀 내용입니다 (최대 {analyzed_rows}행 분석).\n\n"
                 f"{text_map}\n\n"
                 "아래 규칙에 따라 각 필드가 어느 셀에 해당하는지 분석하여 JSON으로 반환하세요.\n\n"
-                "【필드 정의 및 우선순위】\n"
-                "- item_name: 품목명/제품명/품명이 입력되는 셀. '규격', '단위', 'kg', 'EA' 등 단위값이 들어있는 셀은 절대 item_name이 아님.\n"
-                "- spec: 규격/사양이 입력되는 셀. 단위(kg, EA, L 등)가 고정값으로 적혀있는 셀.\n"
-                "- quantity: 수량/QTY가 입력되는 셀. 숫자가 들어가는 곳.\n"
-                "- unit_price: 단가/UNIT PRICE가 입력되는 셀.\n"
-                "- amount: 합계/금액/AMOUNT가 입력되는 셀.\n"
-                "- unit: 단위(kg, EA 등)가 입력되는 셀. 단위가 고정 텍스트로 적혀있으면 이 필드로 분류.\n"
-                "- recipient_name: '귀하', '귀중', '수신처', '貴中' 등 수신자가 입력되는 셀.\n"
-                "- issue_date: 날짜/작성일/견적일이 입력되는 셀.\n"
-                "- total_amount: 총합계/합계(VAT 제외 포함)가 표시되는 셀.\n"
-                "- doc_number: 문서번호가 입력되는 셀.\n\n"
+                "【필드 정의 — 12개 핵심 키 (반드시 cell_map에 포함, null 최소화)】\n"
+                "- recipient_name: '귀하', '귀중', '수신처', '貴中' 등 수신자가 입력되는 셀. 라벨 옆/아래 빈 셀.\n"
+                "- issue_date: 날짜/작성일/견적일이 입력되는 셀. 반드시 찾을 것 — 누락 = 작성일자 빈칸 사고.\n"
+                "- vendor_name: 공급자/업체 회사명이 입력되는 셀 (공급자 섹션).\n"
+                "- vendor_business_no: 공급자 사업자등록번호가 입력되는 셀.\n"
+                "- vendor_address: 공급자 주소가 입력되는 셀.\n"
+                "- vendor_contact: 공급자 전화번호/담당자가 입력되는 셀.\n"
+                "- item_name: 품목명/제품명/품명이 입력되는 첫 번째 데이터 행 셀. 헤더 행 아님.\n"
+                "- unit: 단위(kg, EA 등)가 입력/고정되는 셀.\n"
+                "- quantity: 수량/QTY가 입력되는 데이터 행 셀. 헤더('수량') 아님.\n"
+                "- unit_price: 단가/UNIT PRICE가 입력되는 데이터 행 셀.\n"
+                "- amount: 합계/금액/AMOUNT가 입력되는 데이터 행 셀.\n"
+                "- total_amount: 총합계/합계(VAT 포함/제외 무관)가 표시되는 셀.\n\n"
+                "【추가 필드 — 있으면 반드시 포함】\n"
+                "- doc_number: 문서번호/견적번호가 입력되는 셀.\n"
+                "- spec: 규격/사양이 입력되는 셀.\n"
+                "- representative: 공급자 대표자명 셀.\n"
+                "- tax_amount: 부가세 금액 셀.\n"
+                "- supply_amount: 공급가액(VAT 제외) 셀.\n\n"
+                "【양식 전체 커버리지 — 필수】\n"
+                "양식에 포함된 모든 데이터 입력 셀(공급자 정보, 수신처, 날짜, 문서번호, 품목, 합계, 담당자, 연락처, "
+                "인감/도장 위치 등)을 빠짐없이 cell_map 키로 표현해야 한다.\n"
+                "cell_map에 없는 셀은 초기화되지 않아 이전 견적 데이터(구 품목명, 구 금액, 구 회사명)가 새는 사고가 발생한다.\n\n"
                 "【주의사항 — 반드시 준수】\n"
                 "1. 헤더(라벨) 행과 데이터 행을 반드시 구분할 것.\n"
-                "   - '품목명', '제품명', '품명', 'COMMODITY', '항목' 등 라벨 텍스트가 있는 셀은 헤더 행임.\n"
-                "   - item_name은 헤더 행이 아니라 헤더 바로 아래 첫 번째 데이터 입력 행의 셀 주소를 반환.\n"
+                "   - '품목명', '제품명', '품명', 'COMMODITY', '수량', '단가', '금액' 등 라벨이 있는 셀은 헤더 행.\n"
+                "   - item_name/quantity/unit_price/amount는 헤더 바로 아래 첫 번째 데이터 입력 행의 셀 주소.\n"
                 "   - 예: 헤더가 A11행이면 item_name = 'A12' (데이터 첫 행)\n"
-                "   - 헤더 행에 이미 텍스트가 있고 그 아래가 비어있으면, 비어있는 행이 데이터 입력 행임.\n"
-                "2. 셀에 'kg', 'EA', 'L', '개', '식' 등 단위가 고정값으로 적혀있으면 item_name이 아니라 unit 또는 spec으로 분류.\n"
-                "3. quantity, unit_price, amount도 동일: 헤더('수량', '단가', '금액') 아래 첫 번째 데이터 행.\n"
-                "4. '귀중', '귀하', '貴中', '수신' 텍스트 옆 또는 아래의 빈 셀이 recipient_name.\n"
-                "5. 병합된 셀은 좌상단 셀 주소를 사용.\n"
-                "6. 반드시 JSON만 반환. 다른 텍스트 없음.\n\n"
+                "2. quantity, unit_price, amount가 null이면 품목 테이블 전체를 다시 확인. 수량/단가/금액 열이 반드시 존재.\n"
+                "3. 병합된 셀은 반드시 좌상단(앵커) 셀 좌표로 표현. (예: B2:E2 병합 → 'B2')\n"
+                "4. 반드시 JSON만 반환. 다른 텍스트 없음.\n\n"
                 "【품목 테이블 처리 — 다중 행 지원】\n"
                 "견적서/거래명세서에 품목 목록(line_items) 표가 있으면, cell_map 안에 '_meta' 키를 추가로 반환:\n"
                 '  "_meta": {"items_table": {"start_row": <첫 번째 데이터 행 번호(정수)>, '
-                '"columns": {"item_name": "<열문자>", "spec": "<열문자>", "quantity": "<열문자>", '
-                '"unit_price": "<열문자>", "amount": "<열문자>"}}}\n'
-                "품목 표가 없는 단일 항목 양식이면 '_meta'를 생략한다.\n\n"
+                '"columns": {"item_name": "<열문자>", "spec": "<열문자>", "unit": "<열문자>", '
+                '"quantity": "<열문자>", "unit_price": "<열문자>", "amount": "<열문자>"}, '
+                '"max_rows": <품목 최대 입력 가능 행 수(정수)>}}\n'
+                "columns 안의 열문자가 없으면 null. 품목 표가 없는 단일 항목 양식이면 '_meta'를 생략.\n\n"
                 "【작성일자 처리 — 분리 셀 지원】\n"
+                "issue_date는 반드시 cell_map에 포함. 누락 = 작성일자 빈칸 사고 직결.\n"
                 "작성일자 셀이 년/월/일 분리 구조(예: F3=년도, G3=월, H3=일)이면 3개 키로 반환:\n"
                 '  "issue_date_year": "F3", "issue_date_month": "G3", "issue_date_day": "H3"\n'
-                "분리되지 않고 단일 셀이면 기존대로 'issue_date' 키 하나만 반환. 둘 중 하나만 (혼합 금지).\n\n"
+                "분리되지 않고 단일 셀이면 'issue_date' 키 하나만. 둘 중 하나만 (혼합 금지).\n\n"
                 "【반환 형식 — 반드시 이 구조 그대로】\n"
                 "{\n"
-                '  "sheet_name": "시트명 또는 null",\n'
+                '  "sheet_name": "시트명",\n'
                 '  "cell_map": {\n'
-                '    "item_name": "A9",\n'
-                '    "spec": "B9",\n'
-                '    "quantity": "C9",\n'
-                '    "unit_price": "D9",\n'
-                '    "amount": "E9",\n'
                 '    "recipient_name": "B4",\n'
                 '    "issue_date": "A3",\n'
-                '    "total_amount": "E20",\n'
-                '    "_meta": {"items_table": {"start_row": 9, "columns": {"item_name": "A", "spec": "B", "quantity": "C", "unit_price": "D", "amount": "E"}}}\n'
+                '    "vendor_name": "B12",\n'
+                '    "vendor_business_no": "B13",\n'
+                '    "vendor_address": "B14",\n'
+                '    "vendor_contact": "B15",\n'
+                '    "item_name": "A17",\n'
+                '    "spec": "B17",\n'
+                '    "unit": "C17",\n'
+                '    "quantity": "D17",\n'
+                '    "unit_price": "E17",\n'
+                '    "amount": "F17",\n'
+                '    "total_amount": "F30",\n'
+                '    "doc_number": "G3",\n'
+                '    "_meta": {"items_table": {"start_row": 17, "columns": {"item_name": "A", "spec": "B", "unit": "C", "quantity": "D", "unit_price": "E", "amount": "F"}, "max_rows": 10}}\n'
                 "  }\n"
                 "}\n"
                 "절대 cell_map 안에 cell_map을 중첩하지 말 것. sheet_name은 최상위에만 위치.\n"

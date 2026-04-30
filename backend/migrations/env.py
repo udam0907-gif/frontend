@@ -11,7 +11,18 @@ from alembic import context
 
 # Import all models so Alembic can detect them
 from app.database import Base
-from app.models import document, expense, project, rcms, template, audit  # noqa: F401
+from app.models import (  # noqa: F401
+    document,
+    expense,
+    project,
+    rcms,
+    template,
+    audit,
+    vendor,               # M1.6 보완: autogenerate 정확도 향상
+    vendor_pool,          # M1.6 보완
+    company_setting,      # M1.6 보완
+    document_set_spec,    # M1.6 보완 (M1에서 신규)
+)
 from app.config import settings
 
 config = context.config

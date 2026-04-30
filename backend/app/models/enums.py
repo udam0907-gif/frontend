@@ -14,6 +14,9 @@ class CategoryType(str, Enum):
     materials = "materials"
     meeting = "meeting"
     other = "other"
+    research_activity = "research_activity"
+    indirect_credit = "indirect_credit"
+    entrusted_audit = "entrusted_audit"
 
 
 class ExpenseStatus(str, Enum):

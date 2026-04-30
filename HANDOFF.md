@@ -1,68 +1,110 @@
 # HANDOFF — R&D 비용 집행 관리 시스템
 
-최종 갱신: 2026-04-22
+최종 갱신: 2026-04-30
 
 ---
 
-## 오늘 완료한 것 (2026-04-22)
+## 오늘 완료한 것 (2026-04-30)
 
-- [x] `company_settings` 테이블 migration 적용 완료 (Alembic 007 stamp)
-- [x] Docker 정상 실행 확인: `rnd_postgres`, `rnd_backend`, `rnd_frontend`
-- [x] company-settings API 검증 완료
-  - `GET /api/v1/company-settings`
-  - `PUT /api/v1/company-settings`
-  - `POST /api/v1/company-settings/files`
-- [x] 저장 확인 필드: `company_name`, `company_registration_number`, `representative_name`,
-  `address`, `business_type`, `business_item`, `phone`, `fax`, `email`,
-  `default_manager_name`, `seal_image_path`
-- [x] 파일 업로드 저장 확인: `company_business_registration_path`,
-  `company_bank_copy_path`, `company_quote_template_path`,
-  `company_transaction_statement_template_path`
-- [x] `company_settings` 값이 document context에 반영됨
-  (`recipient_*`, `buyer_*`, `our_company_*` 및 회사 기본서류 경로)
-- [x] quote 재생성 시 `recipient_name = OpenAI Korea` 반영 확인
+- [x] **비목 Enum 3종 추가** — `research_activity`, `indirect_credit`, `entrusted_audit`
+  - `backend/app/models/enums.py` + migration 013 적용
+- [x] **document_set_specs 테이블 신설** (migration 013)
+  - `backend/app/models/document_set_spec.py` — DocumentSetSpec ORM 모델
+  - `backend/migrations/versions/013_document_set_specs.py`
+  - `backend/app/data/document_set_seeds.py` — 비목별 문서세트 시드 데이터
+  - `expense_items.category_payload JSONB` 컬럼 추가
+- [x] **XLSX 셀 매핑 보강** (`xlsx_document_filler.py`)
+  - `_anchor()` 헬퍼: 병합 셀에 값 쓸 때 앵커 좌표 자동 탐색
+  - `_parse_date()` 헬퍼: 날짜 문자열 파싱 (YYYY-MM-DD 등)
+- [x] **문서세트 서비스 수정** (`document_set_service.py`)
+  - 비교견적 금액 100원 단위 올림 강제
+  - 수신자 이름 `{company} 귀하` 자동 포맷팅
+  - 업체 조회 로직: 전사 공통 업체(project_id=NULL) 포함, 프로젝트 전용 우선
+- [x] **TemplatesPanel 드롭다운** (`frontend/components/company/TemplatesPanel.tsx`)
+  - 서류 유형 텍스트 입력 → 선택 드롭다운으로 변경
 
 ---
 
-## 아직 안 된 것
+## 아직 안 된 것 (다음 컴퓨터에서 이어서)
 
 | 항목 | 비고 |
 |------|------|
-| 브라우저 E2E (저장 버튼 클릭) 미확인 | company-settings UI에서 직접 저장 흐름 미검증 |
-| quote 템플릿 `recipient_*` / `buyer_*` 전체 변수 직접 사용 미보강 | 템플릿이 해당 변수를 아직 직접 쓰지 않음 |
-| 지출결의서 / 검수확인서 / 거래명세서 우리 회사 정보 반영 검증 | 다른 출력물에서 추가 확인 필요 |
-| `usage_purpose` / `purchase_purpose` / `delivery_date` 빈 값 | expense_items 컬럼 없음, 프론트 입력 폼 필요 |
-| `line_items` 규격/수량/단가 미반영 | 복수 품목 입력 UI 필요 |
-| `inspection_confirmation` / `transaction_statement` DOCX 미전환 | 다음 단계 |
+| migration 013 실제 DB 적용 확인 | Docker 시작 후 `alembic upgrade head` 실행 |
+| document_set_specs 시드 데이터 INSERT | migration 013의 `upgrade()` 내 seed 삽입 코드 확인 |
+| 비목별 문서세트 API 개발 | `document_set_specs` 기반 GET/POST endpoint |
+| 비교견적 금액 UI 입력 연동 | expense 입력 폼 `compare_amount` 필드 추가 |
+| 지출결의서/검수확인서 우리 회사 정보 반영 검증 | |
+| `usage_purpose`/`purchase_purpose`/`delivery_date` 입력 | expense_items 컬럼 없음, 프론트 폼 필요 |
+| `line_items` 복수 품목 UI | |
 
 ---
 
-## 다음 작업 (우선순위 순)
+## 다른 컴퓨터에서 이어서 작업하는 법
 
-1. **금액 표시 형식 수정** — 천 단위 콤마, 원 단위 표기 정비
-2. **출력물별 양식 값 반영 점검** — 지출결의서/검수확인서/거래명세서 우리 회사 정보 확인
-3. **과제 등록에 정부지원사업 정보 추가** — 과제 등록 폼 확장
-4. **과제 등록에 연구원 등록 구조 추가** — 연구원 목록 관리 UI
+### 1단계: 코드 받기
+```bash
+git clone https://github.com/udam0907-gif/frontend.git cm_app
+cd cm_app
+```
+
+### 2단계: 환경 변수 설정
+`backend/.env` 파일 생성 (`.env.example` 참고):
+```bash
+cp backend/.env.example backend/.env
+# 필요한 값 입력: ANTHROPIC_API_KEY, POSTGRES_PASSWORD 등
+```
+
+### 3단계: Docker 실행
+```bash
+docker compose up -d
+```
+
+### 4단계: DB 복원 (신규 환경일 때만)
+```bash
+# DB가 비어있으면 backup에서 복원
+docker exec -i rnd_postgres psql -U postgres rnd_expense_db < db_backup.sql
+```
+
+### 5단계: Migration 적용 확인
+```bash
+docker exec rnd_backend bash -c "alembic current"
+docker exec rnd_backend bash -c "alembic upgrade head"
+```
+
+### 6단계: 접속 확인
+- 백엔드: http://localhost:8000/docs
+- 프론트엔드: http://localhost:3001
 
 ---
 
-## 기본 브랜치 / Docker 실행
+## 현재 git 상태
 
 - 브랜치: `master`
-- 다음 컴퓨터에서도 **repo-master 기준**으로 Docker 실행 후 이어갈 것
+- 최신 커밋: migration 013 (document_set_specs) + xlsx 병합셀 보강
+- remote: `https://github.com/udam0907-gif/frontend.git`
+- DB 백업: `db_backup.sql` (2026-04-29 16:24 기준)
+
+---
+
+## 기본 Docker 명령어
 
 ```bash
-# Docker 실행
+# 실행
 docker compose up -d
 
-# 마이그레이션 확인
-docker exec rnd_backend bash -c "alembic current"
+# 로그 확인
+docker logs rnd_backend -f
+docker logs rnd_frontend -f
 
-# 마이그레이션 적용 (필요 시)
+# Migration
+docker exec rnd_backend bash -c "alembic current"
 docker exec rnd_backend bash -c "alembic upgrade head"
 
-# 템플릿 재생성 (필요 시)
+# 템플릿 재생성
 docker exec rnd_backend bash -c "python /app/make_docx_templates.py"
+
+# DB 백업 새로 만들기
+docker exec rnd_postgres pg_dump -U postgres rnd_expense_db > db_backup.sql
 ```
 
 ---
@@ -73,6 +115,7 @@ docker exec rnd_backend bash -c "python /app/make_docx_templates.py"
 - `_find_template`: project-specific > global 우선순위
 - `{%tr for item in line_items %}` 행과 content 행은 반드시 분리
 - `test_*.py`, `test_outputs/`, `test_templates/` — 커밋 제외 (테스트용)
+- migration 013은 `category_type` enum ADD VALUE를 포함 → 반드시 `alembic upgrade head` 필요
 
 ---
 
@@ -81,15 +124,6 @@ docker exec rnd_backend bash -c "python /app/make_docx_templates.py"
 - RCMS 매뉴얼 연동 코드 수정 금지
 - `skills/07_rcms_rag_skill.md` 범위 외 작업 금지
 - RCMS 관련 API endpoint 변경 금지
-
----
-
-## 현재 git 상태
-
-- 브랜치: `master`
-- 최신 commit: `a0fbffe` — (원격 최신)
-- remote: `https://github.com/udam0907-gif/frontend.git`
-- 미커밋 파일: `test_*.py`, `test_outputs/`, `test_templates/` (커밋 불필요)
 
 ---
 

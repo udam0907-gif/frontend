@@ -294,11 +294,30 @@ export function TemplatesPanel() {
             </div>
             <div className="space-y-1.5">
               <Label>서류 유형 *</Label>
-              <Input
+              <select
+                className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm"
                 value={form.document_type}
                 onChange={(e) => setForm({ ...form, document_type: e.target.value })}
-                placeholder="예: quote, expense_resolution"
-              />
+                required
+              >
+                <option value="">선택하세요</option>
+                <option value="quote">견적서</option>
+                <option value="comparative_quote">비교견적서</option>
+                <option value="service_contract">용역계약서</option>
+                <option value="work_order">과업지시서</option>
+                <option value="transaction_statement">거래명세서</option>
+                <option value="inspection_photos">검수사진</option>
+                <option value="vendor_business_registration">사업자등록증</option>
+                <option value="vendor_bank_copy">통장사본</option>
+                <option value="cash_expense_resolution">지출결의서_현금</option>
+                <option value="in_kind_expense_resolution">지출결의서_현물</option>
+                <option value="researcher_status_sheet">참여연구원현황표</option>
+                <option value="expense_resolution">지출결의서</option>
+                <option value="inspection_confirmation">검수확인서</option>
+                <option value="receipt">영수증</option>
+                <option value="meeting_minutes">회의록</option>
+                <option value="other">기타</option>
+              </select>
             </div>
             <div className="space-y-1.5">
               <Label>표시 이름 *</Label>

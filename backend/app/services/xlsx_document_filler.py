@@ -12,6 +12,49 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _parse_date(date_str: str):
+    """날짜 문자열(YYYY-MM-DD 등)을 date 객체로 파싱. 실패 시 None 반환."""
+    import re
+    from datetime import date
+    parts = re.split(r"[-./\s]+", date_str.strip())
+    parts = [p for p in parts if p.isdigit()]
+    if len(parts) >= 3:
+        try:
+            return date(int(parts[0]), int(parts[1]), int(parts[2]))
+        except (ValueError, OverflowError):
+            pass
+    return None
+
+
+def _anchor(ws: Any, cell_addr: str) -> str:
+    """
+    cell_addr이 병합 영역에 속하면 그 영역의 좌상단(앵커) 좌표를 반환.
+    아니면 입력된 cell_addr 그대로 반환.
+
+    openpyxl은 병합 영역의 비-앵커 좌표에 값을 쓰면 무시한다.
+    이 헬퍼로 cell_map이 어느 좌표를 반환하든 안전하게 쓰기 가능.
+    """
+    from openpyxl.utils.cell import (
+        coordinate_from_string,
+        column_index_from_string,
+        get_column_letter,
+    )
+
+    try:
+        col_letter, row = coordinate_from_string(cell_addr)
+        col_idx = column_index_from_string(col_letter)
+    except Exception:
+        return cell_addr
+
+    for merged_range in ws.merged_cells.ranges:
+        if (merged_range.min_row <= row <= merged_range.max_row
+                and merged_range.min_col <= col_idx <= merged_range.max_col):
+            anchor_col = get_column_letter(merged_range.min_col)
+            anchor_row = merged_range.min_row
+            return f"{anchor_col}{anchor_row}"
+    return cell_addr
+
+
 class XlsxDocumentFiller:
     """
     cell_map 기반으로 XLSX 템플릿에 값을 채워 새 파일을 생성한다.
@@ -152,9 +195,86 @@ class XlsxDocumentFiller:
         1. cell_map 키와 동일한 context 키 직접 매핑
         2. FIELD_ALIASES 역방향 매핑 (context 키 → cell_map 키)
         3. cell_map 키에 대해 FIELD_ALIASES로 context에서 값 탐색
-        """
-        skip_keys = {"sheet_name", "_cell_map", "_mapping_status"}
 
+        확장:
+        - _meta.items_table 존재 시 line_items 배열을 다중 행으로 입력
+        - issue_date_year/month/day 존재 시 날짜를 분리 셀에 입력
+        """
+        skip_keys = {
+            "sheet_name", "_cell_map", "_mapping_status", "_meta",
+            "issue_date_year", "issue_date_month", "issue_date_day",
+        }
+
+        # ── 다중 행 라인아이템 처리 ──────────────────────────────────────
+        items_meta: dict | None = None
+        if isinstance(cell_map.get("_meta"), dict):
+            items_meta = cell_map["_meta"].get("items_table")
+        if items_meta and context.get("line_items"):
+            start_row = items_meta.get("start_row")
+            columns: dict = items_meta.get("columns", {})
+            if start_row and columns:
+                for idx, item in enumerate(context["line_items"]):
+                    row = int(start_row) + idx
+                    for field_key, col_letter in columns.items():
+                        val = item.get(field_key)
+                        if val is None and field_key == "unit_price":
+                            val = item.get("price")
+                        if val is None:
+                            continue
+                        try:
+                            from decimal import Decimal
+                            if isinstance(val, Decimal):
+                                val = int(val) if val == val.to_integral_value() else float(val)
+                        except Exception:
+                            pass
+                        try:
+                            ws[_anchor(ws, f"{col_letter}{row}")] = val
+                            written.append(f"line_items[{idx}].{field_key}={col_letter}{row}")
+                        except Exception as e:
+                            skipped.append(f"line_items[{idx}].{field_key}({col_letter}{row}): {e}")
+                # items_table 컬럼 키는 단일 셀 루프에서 제외
+                for col_key in columns:
+                    skip_keys.add(col_key)
+
+        # ── 날짜 분리 셀 처리 ────────────────────────────────────────────
+        year_cell = cell_map.get("issue_date_year")
+        month_cell = cell_map.get("issue_date_month")
+        day_cell = cell_map.get("issue_date_day")
+        if year_cell or month_cell or day_cell:
+            raw_date = (
+                context.get("expense_date")
+                or context.get("issue_date")
+                or context.get("execution_date")
+            )
+            date_obj = None
+            if raw_date is not None:
+                if hasattr(raw_date, "year"):
+                    date_obj = raw_date
+                else:
+                    date_obj = _parse_date(str(raw_date))
+            if date_obj is not None:
+                if year_cell:
+                    try:
+                        ws[_anchor(ws, year_cell)] = date_obj.year
+                        written.append(f"issue_date_year={year_cell}")
+                    except Exception as e:
+                        skipped.append(f"issue_date_year({year_cell}): {e}")
+                if month_cell:
+                    try:
+                        ws[_anchor(ws, month_cell)] = date_obj.month
+                        written.append(f"issue_date_month={month_cell}")
+                    except Exception as e:
+                        skipped.append(f"issue_date_month({month_cell}): {e}")
+                if day_cell:
+                    try:
+                        ws[_anchor(ws, day_cell)] = date_obj.day
+                        written.append(f"issue_date_day={day_cell}")
+                    except Exception as e:
+                        skipped.append(f"issue_date_day({day_cell}): {e}")
+            # 분리 처리 여부와 무관하게 issue_date 단일 키는 단일 셀 루프에서 제외
+            skip_keys.add("issue_date")
+
+        # ── 단일 셀 1:1 매핑 (기존 로직 그대로) ─────────────────────────
         for cell_key, cell_addr in cell_map.items():
             if cell_key in skip_keys:
                 continue
@@ -204,7 +324,7 @@ class XlsxDocumentFiller:
                 pass
 
             try:
-                ws[cell_addr] = value
+                ws[_anchor(ws, cell_addr)] = value
                 written.append(f"{cell_key}={cell_addr}")
             except Exception as e:
                 logger.warning("xlsx_cell_set_failed", cell=cell_addr, error=str(e))

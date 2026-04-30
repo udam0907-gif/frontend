@@ -119,6 +119,16 @@ class XlsxCellMapper:
                 "4. '귀중', '귀하', '貴中', '수신' 텍스트 옆 또는 아래의 빈 셀이 recipient_name.\n"
                 "5. 병합된 셀은 좌상단 셀 주소를 사용.\n"
                 "6. 반드시 JSON만 반환. 다른 텍스트 없음.\n\n"
+                "【품목 테이블 처리 — 다중 행 지원】\n"
+                "견적서/거래명세서에 품목 목록(line_items) 표가 있으면, cell_map 안에 '_meta' 키를 추가로 반환:\n"
+                '  "_meta": {"items_table": {"start_row": <첫 번째 데이터 행 번호(정수)>, '
+                '"columns": {"item_name": "<열문자>", "spec": "<열문자>", "quantity": "<열문자>", '
+                '"unit_price": "<열문자>", "amount": "<열문자>"}}}\n'
+                "품목 표가 없는 단일 항목 양식이면 '_meta'를 생략한다.\n\n"
+                "【작성일자 처리 — 분리 셀 지원】\n"
+                "작성일자 셀이 년/월/일 분리 구조(예: F3=년도, G3=월, H3=일)이면 3개 키로 반환:\n"
+                '  "issue_date_year": "F3", "issue_date_month": "G3", "issue_date_day": "H3"\n'
+                "분리되지 않고 단일 셀이면 기존대로 'issue_date' 키 하나만 반환. 둘 중 하나만 (혼합 금지).\n\n"
                 "【반환 형식 — 반드시 이 구조 그대로】\n"
                 "{\n"
                 '  "sheet_name": "시트명 또는 null",\n'
@@ -130,10 +140,12 @@ class XlsxCellMapper:
                 '    "amount": "E9",\n'
                 '    "recipient_name": "B4",\n'
                 '    "issue_date": "A3",\n'
-                '    "total_amount": "E20"\n'
+                '    "total_amount": "E20",\n'
+                '    "_meta": {"items_table": {"start_row": 9, "columns": {"item_name": "A", "spec": "B", "quantity": "C", "unit_price": "D", "amount": "E"}}}\n'
                 "  }\n"
                 "}\n"
                 "절대 cell_map 안에 cell_map을 중첩하지 말 것. sheet_name은 최상위에만 위치.\n"
+                "날짜 분리 셀이면 issue_date 대신 issue_date_year/issue_date_month/issue_date_day 사용.\n"
                 "JSON 외 다른 텍스트 없이 순수 JSON만 반환.\n"
             )
 

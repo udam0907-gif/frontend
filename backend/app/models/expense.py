@@ -40,6 +40,7 @@ class ExpenseItem(Base, TimestampMixin):
     metadata_: Mapped[dict] = mapped_column(
         "metadata", JSONB, nullable=False, default=dict
     )
+    category_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     project: Mapped[object] = relationship("Project", back_populates="expense_items")
     documents: Mapped[list[ExpenseDocument]] = relationship(

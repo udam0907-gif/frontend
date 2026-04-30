@@ -491,8 +491,14 @@ class DocumentSetService:
         # 비교견적 금액: meta의 compare_amount 우선, 없으면 1.1~1.5 랜덤 배율 × 100원 단위 올림
         meta = expense.metadata_ or {}
         if "compare_amount" in meta:
-            compare_amount = int(meta["compare_amount"])
+            _user_amount = int(meta["compare_amount"])
+            compare_amount = math.ceil(_user_amount / 100) * 100   # 100-배수 강제
             _random_rate = Decimal("1.1")  # note 출력용 기본값
+            logger.info(
+                "comparative_amount_user_normalized",
+                user_input=_user_amount,
+                rounded=compare_amount,
+            )
         else:
             original = Decimal(str(expense.amount))
             _random_rate = Decimal(str(round(random.uniform(1.10, 1.50), 2)))
@@ -793,7 +799,7 @@ class DocumentSetService:
             # 수신자(귀중/귀하) — 우리 회사명으로 강제 설정 (setdefault는 빈 문자열을 유지하므로 강제 할당)
             our_company = company_setting.company_name or ""
             if our_company:
-                ctx["recipient_name"] = our_company
+                ctx["recipient_name"] = f"{our_company} 귀하"
                 ctx["recipient"] = our_company
                 ctx["귀하"] = our_company
                 ctx["귀중"] = our_company
@@ -937,11 +943,12 @@ class DocumentSetService:
         project_id: uuid.UUID,
         db: AsyncSession,
     ) -> Vendor | None:
+        """2026-04-29 마이그레이션 012(vendors_global)에 따른 서비스 정합화."""
         if vendor_id:
             try:
                 vid = uuid.UUID(str(vendor_id))
                 result = await db.execute(
-                    select(Vendor).where(Vendor.id == vid, Vendor.project_id == project_id)
+                    select(Vendor).where(Vendor.id == vid)
                 )
                 v = result.scalar_one_or_none()
                 if v:
@@ -949,11 +956,17 @@ class DocumentSetService:
             except (ValueError, AttributeError):
                 pass
         if vendor_name:
+            from sqlalchemy import case, or_
             result = await db.execute(
-                select(Vendor).where(
-                    Vendor.project_id == project_id,
+                select(Vendor)
+                .where(
                     Vendor.name == vendor_name,
+                    or_(Vendor.project_id == project_id, Vendor.project_id.is_(None)),
                 )
+                .order_by(
+                    case((Vendor.project_id == project_id, 1), else_=0).desc()
+                )
+                .limit(1)
             )
             return result.scalar_one_or_none()
         return None

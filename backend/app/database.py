@@ -44,17 +44,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Initialize database extensions and tables."""
+    """
+    Postgres extension만 보장. 테이블 생성은 alembic이 단독 책임.
+    2026-04-29 M1.6: create_all() 제거 (alembic 단일 진실 원천화).
+    """
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-        from app.models import (  # noqa: F401
-            company_setting,
-            document,
-            expense,
-            project,
-            rcms,
-            template,
-            vendor_pool,
-        )
-        await conn.run_sync(Base.metadata.create_all)

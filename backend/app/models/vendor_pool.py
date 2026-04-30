@@ -26,6 +26,7 @@ class VendorTemplatePool(Base, TimestampMixin):
     layout_map: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     render_profile: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     field_map: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    cell_map: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     verified_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sample_file_path: Mapped[str | None] = mapped_column(Text, nullable=True)

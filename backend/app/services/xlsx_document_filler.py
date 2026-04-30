@@ -198,6 +198,19 @@ class XlsxDocumentFiller:
         skipped: list[str] = []
         self._fill_flat(ws, cell_map, context, written, skipped)
 
+        # 3.5. 출력 파일에서 비(非)주력 시트 제거
+        # 템플릿 파일의 비교용·참고용 2차 시트(예: '비교1_동서켐', 'Sheet2' 등)에
+        # 구 견적 데이터가 잔존해 출력 파일에 유출되는 사고를 차단한다.
+        if sheet_name and sheet_name in wb.sheetnames and len(wb.sheetnames) > 1:
+            for _sname in list(wb.sheetnames):
+                if _sname != sheet_name:
+                    del wb[_sname]
+            logger.info(
+                "xlsx_secondary_sheets_removed",
+                kept=sheet_name,
+                total_before=len(wb.sheetnames) + (len(wb.sheetnames) - 1),
+            )
+
         # 4. 저장
         wb.save(output_path)
         wb.close()
@@ -244,12 +257,50 @@ class XlsxDocumentFiller:
             start_row = items_meta.get("start_row")
             columns: dict = items_meta.get("columns", {})
             if start_row and columns:
+                # spec 컬럼이 없거나 item_name과 같은 병합 셀을 가리키면 item_name에 합쳐서 쓴다.
+                # 예: 대신테크젠(spec=None), 민서정밀(spec=None), 선양(spec='D', item_name='C', C9:D9 병합)
+                _spec_col = columns.get("spec")
+                _name_col = columns.get("item_name")
+                _merge_spec_into_name = False
+                if _name_col:
+                    if not _spec_col:
+                        _merge_spec_into_name = True
+                    else:
+                        try:
+                            _probe_row = int(start_row)
+                            if _anchor(ws, f"{_spec_col}{_probe_row}") == _anchor(ws, f"{_name_col}{_probe_row}"):
+                                _merge_spec_into_name = True
+                        except Exception:
+                            pass
+
                 for idx, item in enumerate(context["line_items"]):
                     row = int(start_row) + idx
+
+                    # spec을 item_name에 합칠 경우 병합 값 미리 계산
+                    _merged_item_name: str | None = None
+                    if _merge_spec_into_name and _name_col:
+                        _n = item.get("item_name") or ""
+                        _s = item.get("spec") or ""
+                        _merged_item_name = f"{_n} ({_s})" if (_n and _s) else (_n or _s or None)
+
                     for field_key, col_letter in columns.items():
+                        # col_letter가 None이면 쓸 위치가 없음 — skip
+                        if not col_letter:
+                            skipped.append(f"line_items[{idx}].{field_key}: col=None")
+                            continue
+
                         val = item.get(field_key)
                         if val is None and field_key == "unit_price":
                             val = item.get("price")
+
+                        # spec을 item_name에 합치는 경우
+                        if _merge_spec_into_name:
+                            if field_key == "item_name" and _merged_item_name is not None:
+                                val = _merged_item_name
+                            elif field_key == "spec":
+                                skipped.append(f"line_items[{idx}].spec: merged into item_name")
+                                continue
+
                         if val is None:
                             continue
                         try:

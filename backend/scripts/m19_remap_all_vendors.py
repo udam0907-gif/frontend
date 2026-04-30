@@ -30,7 +30,9 @@ DATE_ALT = {"issue_date_year", "issue_date_month", "issue_date_day"}
 
 DOC_TYPES = [
     ("quote", "quote_template_path"),
-    ("transaction", "transaction_statement_path"),
+    # transaction은 quote cell_map을 공유한다.
+    # remap 시 transaction을 별도 분석하면 pool.cell_map을 덮어써서
+    # quote 생성 시 잘못된 cell_map이 사용되는 사고가 발생한다.
 ]
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
-from app.core.exceptions import DocumentGenerationError
+from app.core.exceptions import DocumentGenerationError, MappingNotFoundError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -133,8 +133,9 @@ class XlsxDocumentFiller:
 
         cell_map: dict = field_map.get("_cell_map", {})
         if not cell_map:
-            raise DocumentGenerationError(
-                "셀 매핑 정보가 없습니다. vendor_template_pool 분석을 먼저 실행하세요."
+            raise MappingNotFoundError(
+                "셀 매핑(cell_map)이 없습니다. "
+                "업체 관리에서 양식 파일을 다시 업로드하여 매핑을 완료하세요."
             )
 
         # 1. 템플릿 복사 (원본 보존)

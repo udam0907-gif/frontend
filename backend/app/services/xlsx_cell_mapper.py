@@ -206,7 +206,7 @@ class XlsxCellMapper:
         return tmp.name
 
     def _xlsx_to_text_map(
-        self, file_path: str, max_rows: int = 60, max_cols: int = 20
+        self, file_path: str, max_rows: int = 60, max_cols: int = 60
     ) -> tuple[str, int]:
         """
         XLSX를 "A1=값, B1=값, ..." 형태의 텍스트로 변환.

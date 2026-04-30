@@ -66,6 +66,40 @@ BLACKLIST_TERMS = [
 # transaction_statement 없음이 정상인 업체
 TS_EXEMPT = {"민서정밀", "아이에이치캠"}
 
+# ── 양식 정적 텍스트 보존 검증 (회귀-2 추가) ──────────────────────────────────
+# vendor별 출력물에 반드시 존재해야 하는 정적 라벨·푸터 키워드.
+# cell_map 초기화 가드가 정적 셀을 지우면 이 키워드들이 사라짐.
+VENDOR_STATIC_KEYWORDS: dict[str, list[str]] = {
+    "민서정밀": [
+        "504-31-43112",      # 사업자등록번호 (vendor 자기 정보)
+        "공장도착도 공급가임",  # 정적 푸터
+        "오늘도 좋은 하루",   # 정적 인사말
+        "등록번호",            # 정적 라벨
+    ],
+    "㈜대신테크젠": [
+        "515-81-47073",      # 사업자등록번호
+        "감사합니다",          # 정적 푸터
+        "귀사의 성공",         # 정적 인사말
+    ],
+    "펀디": [
+        "227-31-06281",      # 사업자등록번호
+        "공 급 자",           # 정적 라벨 (양식 레이아웃)
+    ],
+    "태산물산": [
+        "524-27-00949",      # 사업자등록번호
+        "농협:351-1144-7422-93",  # 정적 입금정보
+    ],
+}
+
+# vendor 자기 정보 보존 검증: (사업자번호, 셀에 실제 존재하는 vendor 식별 문자열)
+# 회사명이 이미지에만 있는 경우 대표자명 등 셀에 실제 존재하는 값으로 대체
+VENDOR_INFO_CHECKS: dict[str, tuple[str, str]] = {
+    "민서정밀":    ("504-31-43112", "민서정밀"),
+    "㈜대신테크젠": ("515-81-47073", "황인성"),    # 회사명은 이미지 전용, 대표자명으로 대체
+    "펀디":        ("227-31-06281", "펀  디"),     # 셀에 이중 공백 포함
+    "태산물산":    ("524-27-00949", "태산물산"),
+}
+
 
 # ── 결과 수집 ──────────────────────────────────────────────────────────────────
 
@@ -192,12 +226,11 @@ async def main() -> bool:
         vendor_rows = list(
             (await db.execute(
                 select(Vendor)
-                .where(Vendor.project_id.is_(None))
                 .order_by(Vendor.created_at)
             )).scalars().all()
         )
         vendor_count = len(vendor_rows)
-        print(f"  Global vendor 수 (DB 동적): {vendor_count}개")
+        print(f"  Vendor 수 (DB 동적, 전체): {vendor_count}개")
         for v in vendor_rows:
             print(f"    · {v.name:20s} biz={v.business_number} quote={'O' if v.quote_template_path else 'X'} ts={'O' if v.transaction_statement_path else 'X'}")
 
@@ -383,6 +416,13 @@ async def main() -> bool:
                 dest = OUTPUT_DIR / f"{main_vendor.name}_{doc_type}_{Path(item.output_path).name}"
                 shutil.copy2(item.output_path, str(dest))
 
+                # 비-XLSX 파일(DOCX 등)은 셀 검증 건너뜀
+                out_ext = Path(item.output_path).suffix.lower()
+                if out_ext not in (".xlsx", ".xls", ".xlsm", ".xltx"):
+                    res.add(main_vendor.name, doc_type, "non_xlsx_passthrough", True,
+                            f"DOCX/PDF 등 비-XLSX 출력 ({out_ext}) — 셀 검증 생략")
+                    continue
+
                 try:
                     cell_values, sheet_names = read_xlsx_cell_values(item.output_path)
                 except Exception as e:
@@ -396,6 +436,38 @@ async def main() -> bool:
                     for check_name, check_fn in QUOTE_CELL_CHECKS.items():
                         passed = check_fn(cell_values)
                         res.add(main_vendor.name, doc_type, f"cell_{check_name}", passed)
+
+                    # 양식 정적 텍스트 보존 검증 (회귀-2 추가)
+                    static_kws = VENDOR_STATIC_KEYWORDS.get(main_vendor.name, [])
+                    if static_kws:
+                        all_text = " ".join(cell_values)
+                        for kw in static_kws:
+                            found = kw in all_text
+                            res.add(
+                                main_vendor.name, doc_type,
+                                f"static_preserved:{kw[:20]}",
+                                found,
+                                "" if found else f"양식 정적 텍스트 소실: {kw!r}",
+                            )
+                    else:
+                        res.add(main_vendor.name, doc_type, "static_keywords_defined", False,
+                                "VENDOR_STATIC_KEYWORDS에 해당 vendor 없음")
+
+                    # vendor 자기 정보 보존 검증 (회귀-2 추가)
+                    info_check = VENDOR_INFO_CHECKS.get(main_vendor.name)
+                    if info_check:
+                        biz_no, name_part = info_check
+                        all_text = " ".join(cell_values)
+                        res.add(
+                            main_vendor.name, doc_type, "vendor_biznum_preserved",
+                            biz_no in all_text,
+                            "" if biz_no in all_text else f"사업자번호 {biz_no!r} 소실",
+                        )
+                        res.add(
+                            main_vendor.name, doc_type, "vendor_name_preserved",
+                            name_part in all_text,
+                            "" if name_part in all_text else f"회사명 {name_part!r} 소실",
+                        )
 
                 # 블랙리스트 검증 (모든 XLSX 문서)
                 all_text = " ".join(cell_values)

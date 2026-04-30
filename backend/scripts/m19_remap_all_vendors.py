@@ -62,11 +62,10 @@ async def remap_all() -> None:
     print("M1.9 회귀-3: 전체 vendor 재매핑 시작")
     print("=" * 70)
 
-    # ── 1. 글로벌 vendor 조회 ─────────────────────────────────────────────
+    # ── 1. vendor 조회 (global + project-specific 모두) ──────────────────
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(Vendor)
-            .where(Vendor.project_id.is_(None))
             .order_by(Vendor.created_at)
         )
         vendors: list[Vendor] = list(result.scalars().all())
@@ -120,7 +119,7 @@ async def remap_all() -> None:
 
                 print(f"    → 새 키={new_count}  누락={missing if missing else '없음'}")
 
-                # DB 갱신
+                # DB 갱신 (UPSERT — pool 행 없으면 새로 생성)
                 async with AsyncSessionLocal() as db:
                     pool_result = await db.execute(
                         select(VendorTemplatePool).where(
@@ -130,14 +129,22 @@ async def remap_all() -> None:
                     pool = pool_result.scalar_one_or_none()
                     if pool:
                         pool.cell_map = new_cell_map
-                        # field_map 안의 _cell_map도 동기화
                         if isinstance(pool.field_map, dict):
                             pool.field_map = {**pool.field_map, "_cell_map": new_cell_map}
                         await db.flush()
                         await db.commit()
-                        print(f"    DB 갱신 완료")
+                        print(f"    DB 갱신 완료 (기존 pool 행 업데이트)")
                     else:
-                        print(f"    ⚠️  pool 행 없음 — DB 갱신 불가")
+                        new_pool = VendorTemplatePool(
+                            vendor_business_number=vendor.business_number,
+                            vendor_name=vendor.name,
+                            cell_map=new_cell_map,
+                            field_map={"_cell_map": new_cell_map},
+                        )
+                        db.add(new_pool)
+                        await db.flush()
+                        await db.commit()
+                        print(f"    DB 갱신 완료 (신규 pool 행 생성)")
 
                 results[vendor.name][doc_label] = {
                     "status": "OK",

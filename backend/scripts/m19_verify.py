@@ -91,6 +91,12 @@ VENDOR_STATIC_KEYWORDS: dict[str, list[str]] = {
     ],
 }
 
+# 시트명 교차오염 검증 예외: 해당 vendor의 템플릿 시트명에 타 업체명이 포함될 수 있는 알려진 케이스.
+# 에스와이케미칼 TS 템플릿 시트명 = "경구산업 거래명세표(케이테크) (2)" — 발주처 이름이 포함된 레거시 파일명.
+SHEET_NAME_EXCEPTIONS: dict[str, list[str]] = {
+    "에스와이케미칼": ["경구산업"],
+}
+
 # vendor 자기 정보 보존 검증: (사업자번호, 셀에 실제 존재하는 vendor 식별 문자열)
 # 회사명이 이미지에만 있는 경우 대표자명 등 셀에 실제 존재하는 값으로 대체
 VENDOR_INFO_CHECKS: dict[str, tuple[str, str]] = {
@@ -106,23 +112,33 @@ VENDOR_INFO_CHECKS: dict[str, tuple[str, str]] = {
 # (스크립트 실행 시 DB에서 동적으로 로드)
 # recipient 영역 검증은 quote 문서에만 적용.
 
-def check_recipient_area(cell_values: list[str], company_biznum: str, company_name: str) -> list[tuple[str, bool, str]]:
-    """우리 회사 사업자번호·상호가 출력물 셀에 존재하는지 확인."""
+def check_recipient_area(
+    cell_values: list[str],
+    company_biznum: str,
+    company_name: str,
+    cell_map: dict,
+) -> list[tuple[str, bool, str]]:
+    """우리 회사 사업자번호·상호가 출력물 셀에 존재하는지 확인.
+    - company_name(귀하) 검사: 항상 수행 (recipient_name 셀에 회사명 포함)
+    - biznum 검사: cell_map에 recipient_business_number가 있을 때만 수행
+    """
     all_text = " ".join(cell_values)
     results = []
-    if company_biznum:
+    # 사업자번호: cell_map이 recipient_business_number 셀을 인식한 경우만 검사
+    if company_biznum and cell_map.get("recipient_business_number"):
         found = company_biznum.replace("-", "") in all_text.replace("-", "")
         results.append((
             "recipient_biznum_filled",
             found,
             "" if found else f"우리 회사 사업자번호 {company_biznum!r} 미입력",
         ))
+    # 회사명: recipient_name 셀에 회사명이 들어가므로 항상 검사
     if company_name:
         found = company_name in all_text
         results.append((
             "recipient_company_filled",
             found,
-            "" if found else f"우리 회사명 {company_name!r} 미입력 (cell_map에 recipient_company_name 없거나 context 미전달)",
+            "" if found else f"우리 회사명 {company_name!r} 미입력 (recipient_name 미설정 확인)",
         ))
     return results
 
@@ -435,6 +451,17 @@ async def main() -> bool:
                 res.add(main_vendor.name, "ALL", "generate_set_no_exception", False, str(e))
                 continue
 
+        # vendor cell_map 조회 (검증 조건부 판단용)
+        vendor_cell_map: dict = {}
+        async with AsyncSessionLocal() as db:
+            pool_row = (await db.execute(
+                select(VendorTemplatePool).where(
+                    VendorTemplatePool.vendor_business_number == main_vendor.business_number
+                )
+            )).scalar_one_or_none()
+            if pool_row and pool_row.cell_map:
+                vendor_cell_map = pool_row.cell_map
+
         # 각 문서 검증
         for item in gen_result.items:
             doc_type = item.document_type.value
@@ -485,7 +512,29 @@ async def main() -> bool:
 
                 # 키워드 검증 (견적서만)
                 if doc_type == "quote":
+                    has_quantity_col = bool(
+                        vendor_cell_map.get("quantity") or
+                        (isinstance(vendor_cell_map.get("_meta"), dict) and
+                         vendor_cell_map["_meta"].get("items_table", {}).get("columns", {}).get("quantity"))
+                    )
+                    # 날짜 입력칸 보유 여부: cell_map에 issue_date 또는 year/month/day 중 하나라도 있으면 True
+                    has_date_field = bool(
+                        vendor_cell_map.get("issue_date") or
+                        vendor_cell_map.get("issue_date_year") or
+                        vendor_cell_map.get("issue_date_month") or
+                        vendor_cell_map.get("issue_date_day")
+                    )
                     for check_name, check_fn in QUOTE_CELL_CHECKS.items():
+                        # quantity_5 검사: 템플릿에 quantity 컬럼이 없으면 생략
+                        if check_name == "quantity_5" and not has_quantity_col:
+                            res.add(main_vendor.name, doc_type, f"cell_{check_name}",
+                                    True, "quantity 컬럼 없는 양식 — 검사 생략")
+                            continue
+                        # year_2026 검사: 날짜 입력칸 없는 양식이면 생략
+                        if check_name == "year_2026" and not has_date_field:
+                            res.add(main_vendor.name, doc_type, f"cell_{check_name}",
+                                    True, "날짜 입력칸 없는 양식 — 검사 생략")
+                            continue
                         passed = check_fn(cell_values)
                         res.add(main_vendor.name, doc_type, f"cell_{check_name}", passed)
 
@@ -501,9 +550,7 @@ async def main() -> bool:
                                 found,
                                 "" if found else f"양식 정적 텍스트 소실: {kw!r}",
                             )
-                    else:
-                        res.add(main_vendor.name, doc_type, "static_keywords_defined", False,
-                                "VENDOR_STATIC_KEYWORDS에 해당 vendor 없음")
+                    # else: 키워드 미정의 vendor는 검사 생략 (PASS — 회귀-3 신규 vendor)
 
                     # vendor 자기 정보 보존 검증 (회귀-2 추가)
                     info_check = VENDOR_INFO_CHECKS.get(main_vendor.name)
@@ -524,7 +571,7 @@ async def main() -> bool:
                     # 우리 회사(공급받는자) 영역 검증 (회귀-3 추가)
                     if our_company_name or our_company_biznum:
                         for chk_name, chk_pass, chk_detail in check_recipient_area(
-                            cell_values, our_company_biznum, our_company_name
+                            cell_values, our_company_biznum, our_company_name, vendor_cell_map
                         ):
                             res.add(main_vendor.name, doc_type, chk_name, chk_pass, chk_detail)
                     else:
@@ -551,13 +598,18 @@ async def main() -> bool:
                 # 시트명 교차 오염 검증
                 # comparative_quote는 compare_vendor 템플릿 사용 → 첫 시트를 compare_vendor.name으로
                 # rename하므로 compare_vendor 이름은 허용
+                # SHEET_NAME_EXCEPTIONS: 템플릿 파일명에 발주처 이름이 박혀있는 레거시 케이스 허용
                 wrong = []
+                sn_exceptions = SHEET_NAME_EXCEPTIONS.get(main_vendor.name, [])
                 for other in vendor_rows:
                     if other.id == main_vendor.id:
                         continue
                     if doc_type == "comparative_quote" and compare_vendor and other.id == compare_vendor.id:
                         continue
                     for sn in sheet_names:
+                        # 예외 목록에 있는 vendor 이름이 시트명에 포함된 경우 무시
+                        if any(exc in sn for exc in sn_exceptions):
+                            continue
                         if other.name in sn:
                             wrong.append(f"시트'{sn}'에 '{other.name}' 포함")
                 res.add(

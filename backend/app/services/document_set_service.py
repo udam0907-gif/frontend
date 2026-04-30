@@ -571,7 +571,7 @@ class DocumentSetService:
                     is_vendor_doc=True,
                 )
 
-        return await self._render_from_template(
+        _doc_item = await self._render_from_template(
             doc_type=COMPARATIVE_DOC,
             template_path=file_path,
             field_map=field_map,
@@ -585,6 +585,21 @@ class DocumentSetService:
             batch_id=batch_id,
             render_profile=render_profile,
         )
+
+        # 비교견적서 시트명 교차 오염 차단: 첫 번째 시트를 compare_vendor.name으로 rename
+        if _doc_item.output_path and Path(_doc_item.output_path).exists():
+            try:
+                import openpyxl as _openpyxl
+                _wb = _openpyxl.load_workbook(_doc_item.output_path)
+                if _wb.worksheets:
+                    _wb.worksheets[0].title = compare_vendor.name[:31]
+                _wb.save(_doc_item.output_path)
+                _wb.close()
+                logger.info("comparative_sheet_renamed", compare_vendor=compare_vendor.name)
+            except Exception as _rename_err:
+                logger.warning("comparative_sheet_rename_failed", error=str(_rename_err))
+
+        return _doc_item
 
     # ─── 공통 렌더 호출 ─────────────────────────────────────────────────────
 

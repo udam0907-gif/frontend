@@ -407,9 +407,13 @@ async def main() -> bool:
                 )
 
                 # 시트명 교차 오염 검증
+                # comparative_quote는 compare_vendor 템플릿 사용 → 첫 시트를 compare_vendor.name으로
+                # rename하므로 compare_vendor 이름은 허용
                 wrong = []
                 for other in vendor_rows:
                     if other.id == main_vendor.id:
+                        continue
+                    if doc_type == "comparative_quote" and compare_vendor and other.id == compare_vendor.id:
                         continue
                     for sn in sheet_names:
                         if other.name in sn:

@@ -121,6 +121,7 @@ async def remap_vendor_template(
     mapper_result = await mapper.analyze(pool.sample_file_path)
     cell_map = mapper_result.get("cell_map", {})
 
+    pool.cell_map = cell_map
     pool.field_map = {
         **pool.field_map,
         "_cell_map": cell_map,

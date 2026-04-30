@@ -75,6 +75,10 @@ class VendorTemplateAnalyzer:
                 pool_id=str(existing_pool.id),
                 verified_count=existing_pool.verified_count,
             )
+            # cell_map 컬럼이 비어있으면 field_map에서 동기화
+            if existing_pool.cell_map is None and existing_pool.field_map.get("_cell_map"):
+                existing_pool.cell_map = existing_pool.field_map["_cell_map"]
+                await db.flush()
             pool = existing_pool
             reused = True
         else:
@@ -108,6 +112,7 @@ class VendorTemplateAnalyzer:
                 layout_map=layout_map,
                 render_profile=render_profile,
                 field_map=field_map,
+                cell_map=field_map.get("_cell_map") or None,
                 verified=False,
                 verified_count=0,
                 sample_file_path=file_path,

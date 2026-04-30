@@ -173,6 +173,65 @@ async def upload_vendor_file(
         file_type=file_type,
         path=file_path,
     )
+
+    # XLSX/XLS 양식 파일이면 cell_map 분석 후 vendor_template_pool upsert
+    # 등록 시점에만 Claude API 호출 — 출력 시점에는 저장된 cell_map 사용
+    if file_type in ("quote_template", "transaction_statement"):
+        _ext = Path(file_path).suffix.lower()
+        if _ext in (".xlsx", ".xls") and vendor.business_number:
+            try:
+                from app.models.vendor_pool import VendorTemplatePool
+                from app.services.llm_service import get_llm_service
+                from app.services.xlsx_cell_mapper import XlsxCellMapper
+
+                _mapper = XlsxCellMapper(get_llm_service())
+                _remap = await _mapper.analyze(file_path)
+                _cell_map = _remap.get("cell_map", {})
+
+                if _cell_map:
+                    _pool_res = await db.execute(
+                        select(VendorTemplatePool).where(
+                            VendorTemplatePool.vendor_business_number == vendor.business_number
+                        )
+                    )
+                    _pool = _pool_res.scalar_one_or_none()
+                    if _pool:
+                        _pool.cell_map = _cell_map
+                        _pool.field_map = {
+                            **_pool.field_map,
+                            "_cell_map": _cell_map,
+                            "_mapping_status": "auto_mapped",
+                        }
+                    else:
+                        _pool = VendorTemplatePool(
+                            id=uuid.uuid4(),
+                            vendor_business_number=vendor.business_number,
+                            vendor_name=vendor.name,
+                            file_format=_ext.lstrip("."),
+                            layout_map={},
+                            render_profile={},
+                            field_map={
+                                "_cell_map": _cell_map,
+                                "_mapping_status": "auto_mapped",
+                            },
+                            cell_map=_cell_map,
+                            sample_file_path=file_path,
+                        )
+                        db.add(_pool)
+                    await db.flush()
+                    logger.info(
+                        "vendor_file_cell_map_saved",
+                        vendor_id=str(vendor_id),
+                        file_type=file_type,
+                        cell_count=len(_cell_map),
+                    )
+            except Exception as _e:
+                logger.warning(
+                    "vendor_file_cell_map_failed",
+                    vendor_id=str(vendor_id),
+                    error=str(_e),
+                )
+
     return vendor
 
 

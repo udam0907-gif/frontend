@@ -262,7 +262,11 @@ class XlsxCellMapper:
 
         반환: {"item_name": "A9", ..., "sheet_name": "X"} 형태의 플랫 딕셔너리
         """
-        match = re.search(r"\{.*\}", content, re.DOTALL)
+        # 마크다운 코드펜스 제거 (LLM이 ```json ... ``` 로 감싸는 경우)
+        stripped = re.sub(r"^```[a-zA-Z]*\s*", "", content.strip())
+        stripped = re.sub(r"\s*```\s*$", "", stripped)
+
+        match = re.search(r"\{.*\}", stripped, re.DOTALL)
         if not match:
             logger.warning("xlsx_cell_map_parse_failed", preview=content[:300])
             return {}

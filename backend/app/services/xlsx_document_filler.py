@@ -164,35 +164,6 @@ class XlsxDocumentFiller:
         sheet_name = cell_map.get("sheet_name")
         ws = wb[sheet_name] if sheet_name and sheet_name in wb.sheetnames else wb.active
 
-        # 2.5. 옛 데이터 초기화 — cell_map 등록 셀 전체를 None으로 클리어
-        # shutil.copy2가 원본 업체 데이터를 그대로 복사하므로,
-        # 쓰기 전에 반드시 대상 셀을 비워야 한다.
-        _CLEAR_SKIP = {"sheet_name", "_cell_map", "_mapping_status", "_meta"}
-        for _key, _addr in cell_map.items():
-            if _key in _CLEAR_SKIP:
-                continue
-            if not isinstance(_addr, str) or not _addr:
-                continue
-            try:
-                ws[_anchor(ws, _addr)] = None
-            except Exception:
-                pass
-
-        # _meta.items_table 컬럼 범위 초기화 (최대 30행)
-        _items_meta_clear: dict | None = None
-        if isinstance(cell_map.get("_meta"), dict):
-            _items_meta_clear = cell_map["_meta"].get("items_table")
-        if _items_meta_clear:
-            _start_row_clear = _items_meta_clear.get("start_row")
-            _cols_clear: dict = _items_meta_clear.get("columns", {})
-            if _start_row_clear and _cols_clear:
-                for _col_letter in _cols_clear.values():
-                    for _row_offset in range(30):
-                        try:
-                            ws[_anchor(ws, f"{_col_letter}{int(_start_row_clear) + _row_offset}")] = None
-                        except Exception:
-                            pass
-
         # 3. 플랫 cell_map으로 셀 채움
         written: list[str] = []
         skipped: list[str] = []
@@ -301,7 +272,7 @@ class XlsxDocumentFiller:
                                 skipped.append(f"line_items[{idx}].spec: merged into item_name")
                                 continue
 
-                        if val is None:
+                        if val is None or val == "":
                             continue
                         try:
                             from decimal import Decimal
@@ -389,7 +360,7 @@ class XlsxDocumentFiller:
                         if value is not None:
                             break
 
-            if value is None:
+            if value is None or value == "":
                 skipped.append(f"{cell_key}({cell_addr})")
                 continue
 

@@ -74,15 +74,7 @@ async def list_vendors(
     project_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[Vendor]:
-    from sqlalchemy import or_
-    stmt = select(Vendor)
-    if project_id is not None:
-        # 전역(project_id=null) + 해당 과제 업체 모두 반환
-        stmt = stmt.where(or_(Vendor.project_id == None, Vendor.project_id == project_id))
-    else:
-        # 전역 업체만
-        stmt = stmt.where(Vendor.project_id == None)
-    stmt = stmt.order_by(Vendor.created_at.desc())
+    stmt = select(Vendor).where(Vendor.project_id == None).order_by(Vendor.created_at.desc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
 

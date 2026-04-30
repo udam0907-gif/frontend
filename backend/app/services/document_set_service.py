@@ -35,7 +35,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.exceptions import DocumentGenerationError
+from app.core.exceptions import DocumentGenerationError, MappingNotFoundError
 from app.core.logging import get_logger
 from app.models.company_setting import CompanySetting
 from app.models.document import GeneratedDocument
@@ -44,6 +44,7 @@ from app.models.expense import ExpenseItem
 from app.models.project import Project
 from app.models.template import Template
 from app.models.vendor import Vendor
+from app.models.vendor_pool import VendorTemplatePool
 from app.services.document_generator import DocumentGenerator
 from app.services.llm_service import get_llm_service
 
@@ -411,30 +412,18 @@ class DocumentSetService:
         field_map = db_template.field_map if db_template else {}
         render_profile = db_template.render_profile if db_template else None
 
-        # XLSX 업체 템플릿이면 cell_map 자동 분석
+        # XLSX: vendor_template_pool에서 cell_map 조회 (출력 시점 API 재호출 금지)
         ext = Path(file_path).suffix.lower()
-        if ext in (".xlsx", ".xls") and not field_map.get("_cell_map"):
+        if ext in (".xlsx", ".xls"):
             try:
-                from app.services.llm_service import get_llm_service
-                from app.services.xlsx_cell_mapper import XlsxCellMapper
-                mapper = XlsxCellMapper(get_llm_service())
-                remap_result = await mapper.analyze(file_path)
-                cell_map = remap_result.get("cell_map", {})
-                if cell_map:
-                    field_map = dict(field_map)
-                    field_map["_cell_map"] = cell_map
-                    field_map["_mapping_status"] = "mapped"
-                    logger.info(
-                        "vendor_xlsx_auto_remapped",
-                        vendor_id=str(vendor.id),
-                        file_path=file_path,
-                        cell_count=len(cell_map),
-                    )
-            except Exception as remap_err:
-                logger.warning(
-                    "vendor_xlsx_auto_remap_failed",
-                    vendor_id=str(vendor.id),
-                    error=str(remap_err),
+                _cell_map = await self._get_cell_map_from_pool(vendor, db)
+                field_map = {**field_map, "_cell_map": _cell_map, "_mapping_status": "mapped"}
+            except MappingNotFoundError as _e:
+                return DocSetItem(
+                    document_type=doc_type,
+                    status="mapping_required",
+                    error_message=_e.message,
+                    is_vendor_doc=True,
                 )
 
         # vendor 상세 정보를 context에 보강
@@ -568,30 +557,18 @@ class DocumentSetService:
         field_map = db_template.field_map if db_template else {}
         render_profile = db_template.render_profile if db_template else None
 
-        # XLSX 비교견적서 템플릿이면 cell_map 자동 분석
+        # XLSX: vendor_template_pool에서 cell_map 조회 (출력 시점 API 재호출 금지)
         ext = Path(file_path).suffix.lower()
-        if ext in (".xlsx", ".xls") and not field_map.get("_cell_map"):
+        if ext in (".xlsx", ".xls"):
             try:
-                from app.services.llm_service import get_llm_service
-                from app.services.xlsx_cell_mapper import XlsxCellMapper
-                mapper = XlsxCellMapper(get_llm_service())
-                remap_result = await mapper.analyze(file_path)
-                cell_map = remap_result.get("cell_map", {})
-                if cell_map:
-                    field_map = dict(field_map)
-                    field_map["_cell_map"] = cell_map
-                    field_map["_mapping_status"] = "mapped"
-                    logger.info(
-                        "compare_vendor_xlsx_auto_remapped",
-                        vendor_id=str(compare_vendor.id),
-                        file_path=file_path,
-                        cell_count=len(cell_map),
-                    )
-            except Exception as remap_err:
-                logger.warning(
-                    "compare_vendor_xlsx_auto_remap_failed",
-                    vendor_id=str(compare_vendor.id),
-                    error=str(remap_err),
+                _cell_map = await self._get_cell_map_from_pool(compare_vendor, db)
+                field_map = {**field_map, "_cell_map": _cell_map, "_mapping_status": "mapped"}
+            except MappingNotFoundError as _e:
+                return DocSetItem(
+                    document_type=COMPARATIVE_DOC,
+                    status="mapping_required",
+                    error_message=_e.message,
+                    is_vendor_doc=True,
                 )
 
         return await self._render_from_template(
@@ -999,3 +976,31 @@ class DocumentSetService:
             ).order_by(Template.created_at.desc()).limit(1)
         )
         return result.scalar_one_or_none()
+
+    async def _get_cell_map_from_pool(
+        self,
+        vendor: Vendor,
+        db: AsyncSession,
+    ) -> dict:
+        """vendor.business_number로 vendor_template_pool 조회 → cell_map 반환.
+
+        pool 없음 또는 cell_map None → MappingNotFoundError (출력 차단).
+        analyze() 호출 절대 금지 — 등록 시점에만 매핑, 출력 시점에는 저장된 값만 사용.
+        """
+        if not vendor.business_number:
+            raise MappingNotFoundError(
+                f"업체 '{vendor.name}'의 사업자번호가 없어 cell_map을 조회할 수 없습니다. "
+                "업체 정보에 사업자번호를 등록하세요."
+            )
+        _result = await db.execute(
+            select(VendorTemplatePool).where(
+                VendorTemplatePool.vendor_business_number == vendor.business_number
+            )
+        )
+        _pool = _result.scalar_one_or_none()
+        if _pool is None or _pool.cell_map is None:
+            raise MappingNotFoundError(
+                f"업체 '{vendor.name}' ({vendor.business_number})의 cell_map이 없습니다. "
+                "업체 관리에서 양식 파일을 다시 업로드하여 매핑을 완료하세요."
+            )
+        return _pool.cell_map

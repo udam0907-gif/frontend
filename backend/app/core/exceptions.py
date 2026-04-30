@@ -75,3 +75,9 @@ class ConflictError(AppError):
 class ParseError(AppError):
     status_code = 422
     error_code = "PARSE_ERROR"
+
+
+class MappingNotFoundError(AppError):
+    """vendor_template_pool에 cell_map이 없을 때 — 출력 차단."""
+    status_code = 422
+    error_code = "MAPPING_NOT_FOUND"

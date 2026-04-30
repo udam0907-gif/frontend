@@ -605,31 +605,6 @@ class DocumentSetService:
         render_profile: dict[str, Any] | None = None,
     ) -> DocSetItem:
         try:
-            _ext = Path(template_path).suffix.lower()
-            if _ext in (".xlsx", ".xls") and not field_map.get("_cell_map"):
-                try:
-                    from app.services.llm_service import get_llm_service
-                    from app.services.xlsx_cell_mapper import XlsxCellMapper
-                    _mapper = XlsxCellMapper(get_llm_service())
-                    _remap_result = await _mapper.analyze(template_path)
-                    _cell_map = _remap_result.get("cell_map", {})
-                    if _cell_map:
-                        field_map = dict(field_map)
-                        field_map["_cell_map"] = _cell_map
-                        field_map["_mapping_status"] = "mapped"
-                        logger.info(
-                            "render_from_template_xlsx_auto_remapped",
-                            template_path=template_path,
-                            template_id=template_id,
-                            cell_count=len(_cell_map),
-                        )
-                except Exception as _remap_err:
-                    logger.warning(
-                        "render_from_template_xlsx_auto_remap_failed",
-                        template_path=template_path,
-                        error=str(_remap_err),
-                    )
-
             gen_result = await generator.generate(
                 template_path=template_path,
                 field_map=field_map,

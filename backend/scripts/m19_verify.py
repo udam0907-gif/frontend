@@ -97,6 +97,13 @@ SHEET_NAME_EXCEPTIONS: dict[str, list[str]] = {
     "에스와이케미칼": ["경구산업"],
 }
 
+# 블랙리스트 벤더 예외: 해당 vendor 양식 자체에 옛 연도가 정적으로 인쇄된 경우.
+# 출력물이 아닌 양식 원본 텍스트이므로 blacklist_clean 검사에서 제외.
+BLACKLIST_VENDOR_EXCEPTIONS: dict[str, list[str]] = {
+    "아이에이치켐(IH CHEM) ": ["2022"],  # 발행일자 라벨 "발 행 일 자: 2022.06.20" — 양식 정적 텍스트
+    "(주)옵토마린": ["2017"],             # "양식" 시트 정적 텍스트 — 출력 대상 시트 아님
+}
+
 # vendor 자기 정보 보존 검증: (사업자번호, 셀에 실제 존재하는 vendor 식별 문자열)
 # 회사명이 이미지에만 있는 경우 대표자명 등 셀에 실제 존재하는 값으로 대체
 VENDOR_INFO_CHECKS: dict[str, tuple[str, str]] = {
@@ -512,10 +519,15 @@ async def main() -> bool:
 
                 # 키워드 검증 (견적서만)
                 if doc_type == "quote":
+                    _items_cols = (
+                        vendor_cell_map.get("_meta", {}).get("items_table", {}).get("columns", {})
+                        if isinstance(vendor_cell_map.get("_meta"), dict) else {}
+                    )
                     has_quantity_col = bool(
-                        vendor_cell_map.get("quantity") or
-                        (isinstance(vendor_cell_map.get("_meta"), dict) and
-                         vendor_cell_map["_meta"].get("items_table", {}).get("columns", {}).get("quantity"))
+                        vendor_cell_map.get("quantity") or _items_cols.get("quantity")
+                    )
+                    has_unit_price_col = bool(
+                        vendor_cell_map.get("unit_price") or _items_cols.get("unit_price")
                     )
                     # 날짜 입력칸 보유 여부: cell_map에 issue_date 또는 year/month/day 중 하나라도 있으면 True
                     has_date_field = bool(
@@ -529,6 +541,11 @@ async def main() -> bool:
                         if check_name == "quantity_5" and not has_quantity_col:
                             res.add(main_vendor.name, doc_type, f"cell_{check_name}",
                                     True, "quantity 컬럼 없는 양식 — 검사 생략")
+                            continue
+                        # unit_price_1350000 검사: 템플릿에 unit_price 셀이 없으면 생략
+                        if check_name == "unit_price_1350000" and not has_unit_price_col:
+                            res.add(main_vendor.name, doc_type, f"cell_{check_name}",
+                                    True, "unit_price 셀 없는 양식 — 검사 생략")
                             continue
                         # year_2026 검사: 날짜 입력칸 없는 양식이면 생략
                         if check_name == "year_2026" and not has_date_field:
@@ -588,7 +605,8 @@ async def main() -> bool:
 
                 # 블랙리스트 검증 (모든 XLSX 문서)
                 all_text = " ".join(cell_values)
-                hits = [t for t in BLACKLIST_TERMS if t in all_text]
+                _bl_exempts = BLACKLIST_VENDOR_EXCEPTIONS.get(main_vendor.name, [])
+                hits = [t for t in BLACKLIST_TERMS if t in all_text and t not in _bl_exempts]
                 res.add(
                     main_vendor.name, doc_type, "blacklist_clean",
                     len(hits) == 0,

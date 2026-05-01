@@ -267,6 +267,9 @@ class XlsxDocumentFiller:
                         _s = item.get("spec") or ""
                         _merged_item_name = f"{_n} ({_s})" if (_n and _s) else (_n or _s or None)
 
+                    # 행별 앵커 충돌 방지 — 먼저 쓴 필드가 해당 앵커를 선점
+                    _row_claimed_anchors: dict[str, str] = {}
+
                     for field_key, col_letter in columns.items():
                         # col_letter가 None이면 쓸 위치가 없음 — skip
                         if not col_letter:
@@ -294,7 +297,17 @@ class XlsxDocumentFiller:
                         except Exception:
                             pass
                         try:
-                            ws[_anchor(ws, f"{col_letter}{row}")] = val
+                            cell_addr = f"{col_letter}{row}"
+                            anchor_addr = _anchor(ws, cell_addr)
+                            # 같은 행에서 이미 이 앵커에 값을 쓴 필드가 있으면 skip
+                            if anchor_addr in _row_claimed_anchors:
+                                skipped.append(
+                                    f"line_items[{idx}].{field_key}({cell_addr}): "
+                                    f"anchor {anchor_addr} already claimed by {_row_claimed_anchors[anchor_addr]}"
+                                )
+                                continue
+                            ws[anchor_addr] = val
+                            _row_claimed_anchors[anchor_addr] = field_key
                             written.append(f"line_items[{idx}].{field_key}={col_letter}{row}")
                         except Exception as e:
                             skipped.append(f"line_items[{idx}].{field_key}({col_letter}{row}): {e}")

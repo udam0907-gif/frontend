@@ -21,11 +21,24 @@ if not exist "%TRANSFER_DIR%\storage_backup.tar.gz" (
     pause & exit /b 1
 )
 
-REM .env 파일 확인
+REM backend/.env 파일 확인
 if not exist "%PROJECT_DIR%backend\.env" (
     echo [오류] backend\.env 파일이 없습니다.
     echo   backend\.env.example 을 복사해서 값을 채워주세요.
     pause & exit /b 1
+)
+
+REM 루트 .env 자동 생성 (없으면 backend/.env 에서 비밀번호 추출)
+if not exist "%PROJECT_DIR%.env" (
+    echo      루트 .env 없음 — backend\.env 에서 비밀번호 추출 중...
+    powershell -Command ^
+        "$content = Get-Content '%PROJECT_DIR%backend\.env' -Raw;" ^
+        "if ($content -match 'postgresql[^:]*://[^:]+:([^@]+)@') {" ^
+        "    $pw = $Matches[1];" ^
+        "    Set-Content -Path '%PROJECT_DIR%.env' -Encoding utf8 -Value " ^
+        "        ('POSTGRES_USER=postgres' + [char]10 + 'POSTGRES_PASSWORD=' + $pw + [char]10 + 'POSTGRES_DB=rnd_expense_db' + [char]10 + 'BACKEND_PORT=8000' + [char]10 + 'FRONTEND_PORT=3001' + [char]10 + 'NEXT_PUBLIC_API_URL=http://localhost:8000');" ^
+        "    Write-Host '     완료: 루트 .env 생성';" ^
+        "} else { Write-Host '[경고] DATABASE_URL 파싱 실패 — 루트 .env 를 직접 만들어주세요.'; }"
 )
 
 echo      OK: 파일 확인 완료

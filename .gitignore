@@ -3,10 +3,23 @@ backend/.env
 backend/.env.*
 !backend/.env.example
 
+# ─── 환경변수 파일 (루트) ────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
 # ─── 백업 데이터 파일 (대용량, git 제외) ─────────────────────────────────
 backend/backup/*.sql
 backend/backup/*.tar.gz
 backend/backup/*.gz
+backups/*.sql
+backups/*.tar.gz
+backups/*.gz
+transfer/
+
+# ─── 임시 스크립트 / 검증 출력물 ────────────────────────────────────────
+backend/scripts/_tmp_*.py
+backend/outputs_verify/
 
 # ─── Backend ──────────────────────────────────────────────────────────────
 backend/__pycache__/

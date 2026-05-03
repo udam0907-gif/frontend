@@ -23,7 +23,7 @@ from app.services.xlsx_cell_mapper import XlsxCellMapper
 
 REQUIRED_KEYS = [
     "recipient_name", "issue_date",
-    "vendor_name", "vendor_business_no",
+    # vendor_name, vendor_business_no는 보존 정책으로 cell_map 제외 — 검사 불필요
     "item_name", "quantity", "unit_price", "amount", "total_amount",
 ]
 DATE_ALT = {"issue_date_year", "issue_date_month", "issue_date_day"}

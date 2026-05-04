@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +24,11 @@ _FILE_TYPE_MAP: dict[str, str] = {
     "bank_copy": "bank_copy_path",
     "quote_template": "quote_template_path",
     "transaction_statement": "transaction_statement_path",
+    "stamp": "stamp_path",
 }
+
+_STAMP_ALLOWED_EXT = {".jpg", ".jpeg", ".png"}
+_STAMP_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
 def _generate_safe_filename(filename: str) -> str:
@@ -143,7 +148,8 @@ async def upload_vendor_file(
 ) -> Vendor:
     """
     업체 파일 업로드.
-    file_type: business_registration | bank_copy | quote_template | transaction_statement
+    file_type: business_registration | bank_copy | quote_template | transaction_statement | stamp
+    stamp: PNG/JPG/JPEG, 5MB 이하
     """
     if file_type not in _FILE_TYPE_MAP:
         raise HTTPException(
@@ -156,6 +162,20 @@ async def upload_vendor_file(
 
     content = await file.read()
     original_filename = file.filename or "file"
+
+    # 직인 파일 전용 검증 (확장자·크기)
+    if file_type == "stamp":
+        ext = Path(original_filename).suffix.lower()
+        if ext not in _STAMP_ALLOWED_EXT:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"직인은 PNG/JPG/JPEG만 허용됩니다. 업로드 파일: {ext or '(확장자 없음)'}",
+            )
+        if len(content) > _STAMP_MAX_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"직인 파일은 5MB 이하여야 합니다. (현재: {len(content) / 1024 / 1024:.1f}MB)",
+            )
 
     dest_dir = Path(settings.storage_documents_path) / "vendors" / str(vendor_id)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -236,6 +256,23 @@ async def upload_vendor_file(
                 )
 
     return vendor
+
+
+@router.get("/{vendor_id}/stamp-preview")
+async def get_vendor_stamp_preview(
+    vendor_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """등록된 직인 이미지 반환."""
+    vendor = await _get_or_404(vendor_id, db)
+    if not vendor.stamp_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="등록된 직인이 없습니다.")
+    p = Path(vendor.stamp_path)
+    if not p.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="직인 파일을 찾을 수 없습니다.")
+    suffix = p.suffix.lower()
+    media_type = "image/png" if suffix == ".png" else "image/jpeg"
+    return FileResponse(str(p), media_type=media_type)
 
 
 async def _get_or_404(vendor_id: uuid.UUID, db: AsyncSession) -> Vendor:

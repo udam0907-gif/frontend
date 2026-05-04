@@ -32,22 +32,25 @@ type VendorFileType =
   | "business_registration"
   | "bank_copy"
   | "quote_template"
-  | "transaction_statement";
+  | "transaction_statement"
+  | "stamp";
 
 const FORM_FILE_FIELDS: {
   key: VendorFileType;
   label: string;
   pathField: keyof Vendor;
   priority: number;
+  accept?: string;
 }[] = [
   { key: "business_registration", label: "사업자등록증", pathField: "business_registration_path", priority: 1 },
   { key: "quote_template", label: "견적서 원본 양식", pathField: "quote_template_path", priority: 2 },
   { key: "transaction_statement", label: "거래명세서 원본 양식", pathField: "transaction_statement_path", priority: 2 },
   { key: "bank_copy", label: "통장사본", pathField: "bank_copy_path", priority: 3 },
+  { key: "stamp", label: "직인 (PNG/JPG)", pathField: "stamp_path", priority: 4, accept: "image/png,image/jpeg" },
 ];
 
 function DropZone({
-  label, file, onFile, onClear, uploading, extracting, badge,
+  label, file, onFile, onClear, uploading, extracting, badge, accept,
 }: {
   label: string;
   file: File | null;
@@ -56,6 +59,7 @@ function DropZone({
   uploading?: boolean;
   extracting?: boolean;
   badge?: string;
+  accept?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -88,7 +92,7 @@ function DropZone({
       <input
         ref={inputRef}
         type="file"
-        accept={ACCEPTED}
+        accept={accept ?? ACCEPTED}
         className="hidden"
         disabled={!!busy}
         onChange={(e) => {
@@ -168,6 +172,7 @@ export default function VendorsPage() {
     quote_template: null,
     transaction_statement: null,
     bank_copy: null,
+    stamp: null,
   });
   const [extractingKey, setExtractingKey] = useState<VendorFileType | null>(null);
   const [extractNotice, setExtractNotice] = useState<string | null>(null);
@@ -208,7 +213,7 @@ export default function VendorsPage() {
 
   const resetForm = () => {
     setForm(initialForm);
-    setFormFiles({ business_registration: null, quote_template: null, transaction_statement: null, bank_copy: null });
+    setFormFiles({ business_registration: null, quote_template: null, transaction_statement: null, bank_copy: null, stamp: null });
     setExtractNotice(null);
   };
 
@@ -291,6 +296,7 @@ export default function VendorsPage() {
                       uploading={fileUploading === `form_${ft.key}`}
                       extracting={extractingKey === ft.key}
                       badge={PRIORITY_BADGE[ft.priority]}
+                      accept={ft.accept}
                     />
                   </div>
                 ))}
@@ -398,7 +404,19 @@ export default function VendorsPage() {
                       <FileBadge path={vendor.transaction_statement_path} label="거래명세서" />
                       <FileBadge path={vendor.business_registration_path} label="사업자등록증" />
                       <FileBadge path={vendor.bank_copy_path} label="통장사본" />
+                      <FileBadge path={vendor.stamp_path} label="직인" />
                     </div>
+                    {vendor.stamp_path && (
+                      <div className="flex items-center gap-2 p-2 rounded border border-green-200 bg-green-50">
+                        <img
+                          src={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/vendors/${vendor.id}/stamp-preview`}
+                          alt="등록된 직인"
+                          className="h-10 w-auto object-contain border border-green-300 rounded bg-white"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                        <span className="text-xs text-green-700 font-medium">직인 등록됨</span>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-2">
                       {FORM_FILE_FIELDS.map((ft) => {
                         const hasFile = Boolean(vendor[ft.pathField]);
@@ -412,7 +430,7 @@ export default function VendorsPage() {
                           >
                             <input
                               type="file"
-                              accept={ACCEPTED}
+                              accept={ft.accept ?? ACCEPTED}
                               className="hidden"
                               disabled={uploading}
                               onChange={(e) => {

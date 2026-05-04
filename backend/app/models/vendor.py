@@ -31,3 +31,4 @@ class Vendor(Base, TimestampMixin):
     bank_copy_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     quote_template_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     transaction_statement_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stamp_path: Mapped[str | None] = mapped_column(String(500), nullable=True)

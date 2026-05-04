@@ -31,6 +31,7 @@ class VendorRead(BaseModel):
     bank_copy_path: str | None
     quote_template_path: str | None
     transaction_statement_path: str | None
+    stamp_path: str | None
     created_at: datetime
     updated_at: datetime
 

@@ -318,6 +318,7 @@ export interface Vendor {
   bank_copy_path: string | null;
   quote_template_path: string | null;
   transaction_statement_path: string | null;
+  stamp_path: string | null;
   created_at: string;
   updated_at: string;
 }

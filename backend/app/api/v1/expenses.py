@@ -248,6 +248,47 @@ async def delete_expense_document(
     await db.delete(doc)
 
 
+@router.post("/{expense_id}/line-item-image", status_code=status.HTTP_200_OK)
+async def upload_line_item_image(
+    expense_id: uuid.UUID,
+    line_item_index: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """line_items[line_item_index].image_path 갱신 — 검수조서 이미지 업로드용."""
+    if line_item_index not in (0, 1):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="line_item_index는 0 또는 1만 허용합니다.")
+
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in {".jpg", ".jpeg", ".png"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="이미지는 JPG/JPEG/PNG만 허용합니다.")
+
+    expense = await _get_expense_or_404(expense_id, db)
+    content = await file.read()
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="이미지 크기는 20MB를 초과할 수 없습니다.")
+
+    dest_dir = Path(settings.storage_documents_path) / "expenses" / str(expense_id) / "line_images"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = f"line_{line_item_index}_{generate_safe_filename(file.filename or 'image.jpg')}"
+    abs_path = dest_dir / safe_name
+    abs_path.write_bytes(content)
+
+    # metadata_.line_items[line_item_index].image_path 갱신
+    meta: dict = dict(expense.metadata_ or {})
+    items: list = list(meta.get("line_items") or [])
+    while len(items) <= line_item_index:
+        items.append({})
+    items[line_item_index] = dict(items[line_item_index])
+    items[line_item_index]["image_path"] = str(abs_path)
+    meta["line_items"] = items
+    expense.metadata_ = meta
+
+    await db.commit()
+    logger.info("line_item_image_uploaded", expense_id=str(expense_id), index=line_item_index, path=str(abs_path))
+    return {"image_path": str(abs_path), "line_item_index": line_item_index}
+
+
 async def _extract_document_data_background(
     document_id: uuid.UUID,
     file_path: str,

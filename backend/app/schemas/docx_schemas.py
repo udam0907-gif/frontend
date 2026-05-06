@@ -212,6 +212,32 @@ SCHEMA_EXPENSE_RESOLUTION = DocxSchema(
     ),
 )
 
+_PURCHASE_REQUEST_COLUMNS = {
+    "item_name":  LineItemColumnSpec("품명",   "text",   True),
+    "spec":       LineItemColumnSpec("규격",   "text",   False),
+    "quantity":   LineItemColumnSpec("수량",   "number", True),
+    "unit_price": LineItemColumnSpec("단가",   "number", True),
+    "amount":     LineItemColumnSpec("금액",   "number", False),
+    "remark":     LineItemColumnSpec("비고",   "text",   False),
+}
+
+SCHEMA_PURCHASE_REQUEST = DocxSchema(
+    document_type="purchase_request",
+    scalar_fields={
+        "title":            FieldSpec("품의 제목",       "text",   True),
+        "author":           FieldSpec("작성자",          "text",   False),
+        "department":       FieldSpec("부서",            "text",   False),
+        "issue_date":       FieldSpec("작성일자",        "date",   True),
+        "purpose":          FieldSpec("구매목적/사유",   "text",   False),
+        "vendor_name":      FieldSpec("업체명",          "text",   True),
+        "vendor_representative": FieldSpec("업체 대표자", "text", False),
+        "vendor_contact":   FieldSpec("업체 연락처",     "text",   False),
+        "total_amount":     FieldSpec("합계금액",        "number", True),
+        "remark":           FieldSpec("비고",            "text",   False),
+    },
+    line_items=LineItemsSpec(max_rows=9, columns=_PURCHASE_REQUEST_COLUMNS),
+)
+
 
 # ─── 스키마 레지스트리 ────────────────────────────────────────────────────────
 
@@ -221,6 +247,7 @@ DOCX_SCHEMAS: dict[str, DocxSchema] = {
     "transaction_statement":   SCHEMA_TRANSACTION_STATEMENT,
     "inspection_confirmation": SCHEMA_INSPECTION_CONFIRMATION,
     "expense_resolution":      SCHEMA_EXPENSE_RESOLUTION,
+    "purchase_request":        SCHEMA_PURCHASE_REQUEST,
 }
 
 
@@ -253,6 +280,11 @@ DOCX_FIELD_ALIASES: dict[str, dict[str, str]] = {
     },
     "expense_resolution": {
         "expense_date":                "execution_date",
+    },
+    "purchase_request": {
+        "expense_date":                "issue_date",
+        "vendor_name":                 "vendor_name",
+        "our_company_representative":  "author",
     },
 }
 

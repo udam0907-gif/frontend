@@ -66,6 +66,58 @@ skills/12_verify_before_done_skill.md          — 수정 후 검증 강제화 /
 
 ---
 
+## 작업 범위 — 묻지 않고 진행 vs 묻고 진행
+
+### 묻지 않고 자율 진행 (cm_app 프로젝트 내부)
+
+다음 영역의 파일·폴더는 **사용자에게 별도 확인 없이** 작업 진행한다.
+
+```
+cm_app/                                  ← 프로젝트 루트 안 전체
+  ├── backend/                            (코드, scripts, storage, outputs_verify, .env 등)
+  ├── frontend/                           (Next.js)
+  ├── skills/                             (개발 스킬 문서)
+  ├── uploads/                            (사용자 업로드 임시)
+  ├── backups/, design_images/, ...
+  └── *.md, docker-compose.yml, .env 등
+```
+
+- 새 스크립트 작성 (`backend/scripts/m1XX_*.py`)
+- 결과 파일 읽기·쓰기 (`backend/outputs_verify/`)
+- 양식 파일 분석 (`uploads/*.xlsx`)
+- DB 조회 (이 프로젝트의 DB만 — `rnd_expense_db`)
+- `docker exec` 명령 (이 프로젝트의 컨테이너 — `rnd_backend`, `rnd_postgres`, `rnd_frontend`)
+- git 상태 확인·diff (cm_app 저장소 내)
+
+단, 이 영역에서도 「⛔ 절대 수정 금지 파일」은 그대로 적용된다.
+
+### 묻고 진행 (cm_app 외부)
+
+다음은 **사용자에게 명시적으로 확인받기 전**에는 접근·수정하지 않는다.
+
+```
+C:\Users\FORYOUCOM\Documents\           ← 사용자 개인 문서
+C:\Users\FORYOUCOM\Downloads\           ← 다운로드 폴더
+C:\Users\FORYOUCOM\Desktop\             ← 바탕화면
+C:\Users\FORYOUCOM\AppData\             ← 앱 데이터
+C:\Windows\, C:\Program Files\          ← 시스템 디렉토리
+다른 사용자 계정의 폴더
+다른 docker container (cm_app과 무관한)
+다른 DB·스키마
+```
+
+이런 위치를 건드려야 하는 작업이면 사전에:
+- 「`C:\Users\FORYOUCOM\Downloads\xxx.xlsx`를 cm_app 외부에서 가져와야 하는데 진행할까?」
+처럼 명시적 확인을 받는다.
+
+### 작업지시서 작성 시
+
+새 작업지시서를 만들 때 이 규칙을 자동 적용한다:
+- cm_app 내부 작업만 있으면 「외부 폴더 확인」 단계 생략
+- cm_app 외부가 필요한 단계가 있으면 「사용자 사전 확인」 항목 명시
+
+---
+
 ## 작업 원칙
 
 ### 1. "돌아간다"와 "정상이다"는 다르다

@@ -59,6 +59,7 @@ DOCUMENT_SETS: dict[CategoryType, list[DocumentType]] = {
         DocumentType.transaction_statement,
         DocumentType.expense_resolution,
         DocumentType.inspection_confirmation,
+        DocumentType.purchase_request,
         DocumentType.vendor_business_registration,
         DocumentType.vendor_bank_copy,
     ],
@@ -804,6 +805,12 @@ class DocumentSetService:
         )
         if inspection_images:
             ctx["inspection_image_path"] = inspection_images[-1].file_path
+
+        # 품의서/검수확인서 InlineImage용: line_items[0~1].image_path 추출
+        for idx, li in enumerate((ctx.get("line_items") or [])[:2]):
+            if isinstance(li, dict) and li.get("image_path"):
+                ctx[f"image_{idx + 1}_path"] = li["image_path"]
+
         ctx.setdefault("recipient_display_name", f"{vendor_name} 귀하" if vendor_name else "")
 
         # vendor 정보가 context에 없으면 expense의 vendor_name으로 보완

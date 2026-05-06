@@ -164,11 +164,6 @@ export default function ProjectExpensesPage() {
   >({});
   // 방금 이 세션에서 새로 생성된 재료비 expense ID — 검수 이미지 업로드 섹션 표시에 사용
   const [lastCreatedExpenseId, setLastCreatedExpenseId] = useState<string | null>(null);
-  // 품목 이미지 업로드 상태: key = `${expenseId}_${lineItemIndex}`
-  const [lineImageUploadingKey, setLineImageUploadingKey] = useState<string | null>(null);
-  const [lineImageMessages, setLineImageMessages] = useState<
-    Record<string, { type: "success" | "error" | "info"; text: string }>
-  >({});
 
   const { data: project } = useQuery({
     queryKey: ["project", projectId],
@@ -393,26 +388,6 @@ export default function ProjectExpensesPage() {
     } finally {
       setInspectionUploadingId(null);
       setInspectionDragId(null);
-    }
-  };
-
-  const handleLineItemImageUpload = async (expenseId: string, lineItemIndex: number, file: File | null | undefined) => {
-    if (!file) return;
-    if (!isAllowedInspectionImage(file)) {
-      setLineImageMessages(prev => ({ ...prev, [`${expenseId}_${lineItemIndex}`]: { type: "error", text: "JPG, JPEG, PNG 파일만 업로드할 수 있습니다." } }));
-      return;
-    }
-    const key = `${expenseId}_${lineItemIndex}`;
-    setLineImageUploadingKey(key);
-    setLineImageMessages(prev => ({ ...prev, [key]: { type: "info", text: `${file.name} 업로드 중...` } }));
-    try {
-      await expensesApi.uploadLineItemImage(expenseId, lineItemIndex, file);
-      setLineImageMessages(prev => ({ ...prev, [key]: { type: "success", text: `${file.name} 업로드 완료` } }));
-      await queryClient.invalidateQueries({ queryKey: ["expenses", projectId] });
-    } catch (err) {
-      setLineImageMessages(prev => ({ ...prev, [key]: { type: "error", text: err instanceof Error ? err.message : "업로드 실패" } }));
-    } finally {
-      setLineImageUploadingKey(null);
     }
   };
 
@@ -901,58 +876,6 @@ export default function ProjectExpensesPage() {
                           </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })()}
-
-                {/* 품목 이미지 업로드 (품의서용 — idx 0~1만) */}
-                {lastCreatedExpenseId && (() => {
-                  const savedExpense = (expenses ?? []).find(e => e.id === lastCreatedExpenseId);
-                  if (!savedExpense) return null;
-                  const lineItemsData = (savedExpense.input_data?.line_items ?? []) as Array<{ item_name?: string; image_path?: string }>;
-                  return (
-                    <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4 space-y-3">
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900">품목 이미지 업로드 (선택)</p>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          업로드한 이미지는 <span className="font-medium text-blue-700">품의서</span>에 자동 삽입됩니다. (최대 2장)
-                        </p>
-                      </div>
-                      {[0, 1].map((idx) => {
-                        const key = `${lastCreatedExpenseId}_${idx}`;
-                        const isBusy = lineImageUploadingKey === key;
-                        const msg = lineImageMessages[key];
-                        const existingPath = lineItemsData[idx]?.image_path;
-                        const itemLabel = lineItemsData[idx]?.item_name ? `품목 ${idx + 1}: ${lineItemsData[idx].item_name}` : `품목 ${idx + 1}`;
-                        return (
-                          <div key={idx} className="flex items-center gap-3 bg-white rounded border border-gray-100 px-3 py-2">
-                            <span className="text-xs text-gray-500 w-28 shrink-0">{itemLabel}</span>
-                            <div className="flex-1 min-w-0">
-                              {existingPath ? (
-                                <p className="text-xs text-green-700 truncate">등록됨: {existingPath.split(/[\\/]/).pop()}</p>
-                              ) : (
-                                <p className="text-xs text-gray-400">이미지 없음</p>
-                              )}
-                              {msg && (
-                                <p className={`text-xs mt-0.5 ${msg.type === "error" ? "text-red-600" : msg.type === "success" ? "text-green-700" : "text-blue-600"}`}>{msg.text}</p>
-                              )}
-                            </div>
-                            <label className="inline-flex cursor-pointer items-center justify-center rounded border border-gray-300 bg-white px-2 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 shrink-0">
-                              {isBusy ? "처리 중..." : existingPath ? "교체" : "선택"}
-                              <input
-                                type="file"
-                                accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-                                className="hidden"
-                                disabled={isBusy}
-                                onChange={(e) => {
-                                  void handleLineItemImageUpload(lastCreatedExpenseId, idx, e.target.files?.[0]);
-                                  e.currentTarget.value = "";
-                                }}
-                              />
-                            </label>
-                          </div>
-                        );
-                      })}
                     </div>
                   );
                 })()}

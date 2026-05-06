@@ -13,7 +13,6 @@ Document Generator — 파일 형식별 렌더러
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import uuid
 import zipfile
@@ -136,7 +135,6 @@ class DocumentGenerator:
                 "transaction_statement",
                 "expense_resolution",
                 "inspection_confirmation",
-                "purchase_request",
             }:
                 return self._generate_docx_form(
                     template_path,
@@ -981,21 +979,6 @@ class DocumentGenerator:
             # subtotal/vat 기본값 보장 (docxtpl 템플릿이 해당 변수를 쓸 경우)
             context.setdefault("subtotal", context.get("total_amount", ""))
             context.setdefault("vat", 0)
-
-            # line_items padding: expense_resolution=5행, purchase_request=9행
-            _pad_targets = {"expense_resolution": 5, "purchase_request": 9}
-            if document_type in _pad_targets:
-                context["line_items"] = self._pad_line_items(
-                    context.get("line_items") or [], _pad_targets[document_type]
-                )
-
-            # 비목 체크박스 box_* 주입 (☑/☐)
-            if document_type in {"expense_resolution", "purchase_request"}:
-                category = str(context.get("category_type", ""))
-                checked = self._BOX_MAPPING.get(category, "")
-                for bk in self._BOX_KEYS:
-                    context.setdefault(bk, "☑" if bk == checked else "☐")
-
             output_path = self._render_docx(template_path, context, expense_item_id)
             trace = {
                 "template_path": template_path,
@@ -1109,21 +1092,8 @@ class DocumentGenerator:
 
     def _render_docx(self, template_path: str, context: dict[str, Any], expense_item_id: str) -> str:
         try:
-            from docxtpl import InlineImage
-            from docx.shared import Mm
-
             tpl = DocxTemplate(template_path)
             safe_context = self._sanitize_context(context)
-
-            # image_*_path → InlineImage (검수확인서 / 품의서용)
-            for img_key in ("image_1_path", "image_2_path"):
-                path = safe_context.get(img_key)
-                if isinstance(path, str) and path:
-                    abs_path = path if os.path.isabs(path) else str(Path("/app") / path)
-                    if os.path.exists(abs_path):
-                        img_num = img_key.split("_")[1]
-                        safe_context[f"image_{img_num}"] = InlineImage(tpl, abs_path, width=Mm(70))
-
             tpl.render(safe_context)
             output_filename = f"{expense_item_id}_{uuid.uuid4().hex[:8]}.docx"
             output_path = str(self._output_base / output_filename)
@@ -1527,26 +1497,6 @@ class DocumentGenerator:
         return context, llm_fields, token_usage
 
     # ─── 유틸 ────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _pad_line_items(items: list[dict], target: int) -> list[dict]:
-        """line_items를 target 행 수까지 빈 dict로 채운다."""
-        empty = {"item_name": "", "spec": "", "quantity": "", "unit_price": "", "amount": "", "remark": ""}
-        pad = [dict(empty) for _ in range(max(0, target - len(items)))]
-        return items + pad
-
-    # 비목 체크박스 매핑 (expense_resolution / purchase_request docxtpl용)
-    _BOX_MAPPING: dict[str, str] = {
-        "materials":   "box_materials",
-        "labor":       "box_personnel",
-        "outsourcing": "box_activity",
-        "meeting":     "box_activity",
-        "test_report": "box_activity",
-        "other":       "box_indirect",
-    }
-    _BOX_KEYS: tuple[str, ...] = (
-        "box_materials", "box_personnel", "box_activity", "box_indirect", "box_research"
-    )
 
     def _sanitize_context(self, context: dict[str, Any]) -> dict[str, Any]:
         import re

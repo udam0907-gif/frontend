@@ -188,16 +188,6 @@ export const expensesApi = {
 
   deleteDocument: (expenseId: string, documentId: string) =>
     apiClient.delete(`/expenses/${expenseId}/documents/${documentId}`).then((r) => r.data),
-
-  uploadLineItemImage: (expenseId: string, lineItemIndex: number, file: File) => {
-    const form = new FormData();
-    form.append("file", file);
-    return apiClient
-      .post(`/expenses/${expenseId}/line-item-image?line_item_index=${lineItemIndex}`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      })
-      .then((r) => r.data as { image_path: string; line_item_index: number });
-  },
 };
 
 // ─── Validation ──────────────────────────────────────────────────────────────

@@ -45,7 +45,6 @@ class DocumentType(str, Enum):
     expense_resolution = "expense_resolution"
     # Materials
     inspection_confirmation = "inspection_confirmation"
-    purchase_request = "purchase_request"  # 품의서 (M2.6)
     # Meeting
     receipt = "receipt"
     meeting_minutes = "meeting_minutes"

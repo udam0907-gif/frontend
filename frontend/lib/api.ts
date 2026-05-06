@@ -68,9 +68,7 @@ export const projectsApi = {
     const form = new FormData();
     form.append("file", file);
     return apiClient
-      .post<Project>(`/projects/${id}/${type}`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      })
+      .post<Project>(`/projects/${id}/${type}`, form)
       .then((r) => r.data);
   },
 
@@ -79,7 +77,6 @@ export const projectsApi = {
     form.append("file", file);
     return apiClient
       .post<ExtractedProjectData>(`/projects/extract-pdf?doc_type=${docType}`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
         timeout: 120000,
       })
       .then((r) => r.data);
@@ -120,9 +117,7 @@ export const templatesApi = {
     form.append("name", displayName);
     if (projectId) form.append("project_id", projectId);
     return apiClient
-      .post<Template>("/templates", form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      })
+      .post<Template>("/templates", form)
       .then((r) => r.data);
   },
 
@@ -180,9 +175,7 @@ export const expensesApi = {
     form.append("file", file);
     form.append("document_type", documentType);
     return apiClient
-      .post(`/expenses/${expenseId}/documents`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      })
+      .post(`/expenses/${expenseId}/documents`, form)
       .then((r) => r.data);
   },
 
@@ -225,9 +218,7 @@ export const rcmsApi = {
     form.append("display_name", displayName);
     form.append("version", version);
     return apiClient
-      .post<RcmsManual>("/rcms/manuals", form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      })
+      .post<RcmsManual>("/rcms/manuals", form)
       .then((r) => r.data);
   },
 
@@ -299,9 +290,7 @@ export const vendorsApi = {
     const form = new FormData();
     form.append("file", file);
     return apiClient
-      .post<VendorExtractResult>("/vendors/extract", form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      })
+      .post<VendorExtractResult>("/vendors/extract", form)
       .then((r) => r.data);
   },
 
@@ -318,9 +307,7 @@ export const vendorsApi = {
     form.append("file", file);
     form.append("file_type", fileType);
     return apiClient
-      .post<Vendor>(`/vendors/${id}/files`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      })
+      .post<Vendor>(`/vendors/${id}/files`, form)
       .then((r) => r.data);
   },
 };
@@ -393,9 +380,7 @@ export const companySettingsApi = {
     form.append("file_type", fileType);
     form.append("file", file);
     return apiClient
-      .post<CompanySettings>("/company-settings/files", form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      })
+      .post<CompanySettings>("/company-settings/files", form)
       .then((r) => r.data);
   },
 

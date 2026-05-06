@@ -677,7 +677,7 @@ export default function ProjectExpensesPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="usagePurpose">사용 목적</Label>
+                <Label>용 도</Label>
                 <Textarea
                   id="usagePurpose"
                   rows={2}

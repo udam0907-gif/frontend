@@ -291,7 +291,7 @@ export default function ProjectVendorsPage() {
           </CardTitle>
           <p className="text-xs text-gray-500">
             파일을 업로드하면 업체명·사업자번호·연락처가 자동으로 채워집니다.
-            내용을 확인 후 업체 구분을 선택하고 저장하세요.
+            내용을 확인 후 저장하세요.
           </p>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -340,10 +340,8 @@ export default function ProjectVendorsPage() {
                   placeholder="예: 문구스토어"
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label>업체 구분 *</Label>
+              <div className="hidden">
                 <select
-                  className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm"
                   value={form.vendor_category}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, vendor_category: e.target.value as VendorCategory }))
@@ -421,9 +419,6 @@ export default function ProjectVendorsPage() {
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-semibold text-gray-900">{vendor.name}</p>
-                        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
-                          {vendor.vendor_category}
-                        </span>
                       </div>
                       <p className="text-xs text-gray-400">
                         {vendor.business_number}

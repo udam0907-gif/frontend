@@ -9,7 +9,7 @@ import {
   EXPENSE_STATUS_COLORS,
   EXPENSE_STATUS_LABELS,
 } from "@/lib/constants";
-import type { CategoryType, ExpenseCreate } from "@/lib/types";
+import type { CategoryType, ExpenseCreate, ExpenseItem } from "@/lib/types";
 import {
   Card,
   CardContent,
@@ -24,6 +24,16 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ReceiptText, Plus, Pencil, Trash2, X } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+
+function formatExpenseTitle(expense: ExpenseItem): string {
+  if (expense.category_type === "materials") {
+    const items = expense.input_data?.line_items;
+    if (items && items.length > 1 && items[0]?.item_name) {
+      return `${items[0].item_name} 외`;
+    }
+  }
+  return expense.title;
+}
 
 interface EditForm {
   title: string;
@@ -535,7 +545,7 @@ export default function ProjectExpensesPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="expenseDate">집행일자</Label>
+                <Label htmlFor="expenseDate">세금계산서 발행일자</Label>
                 <Input
                   id="expenseDate"
                   type="date"
@@ -557,7 +567,7 @@ export default function ProjectExpensesPage() {
                     <option value="">-- 업체 선택 --</option>
                     {(vendors ?? []).map((v) => (
                       <option key={v.id} value={v.id}>
-                        {v.name} ({v.vendor_category})
+                        {v.name}
                       </option>
                     ))}
                   </select>
@@ -590,7 +600,7 @@ export default function ProjectExpensesPage() {
                         .filter((v) => v.id !== base.vendorId)
                         .map((v) => (
                           <option key={v.id} value={v.id}>
-                            {v.name} ({v.vendor_category})
+                            {v.name}
                           </option>
                         ))}
                     </select>
@@ -1037,7 +1047,7 @@ export default function ProjectExpensesPage() {
                               {CATEGORY_LABELS[expense.category_type]}
                             </span>
                           </td>
-                          <td className="py-3 px-2 font-medium text-gray-800">{expense.title}</td>
+                          <td className="py-3 px-2 font-medium text-gray-800">{formatExpenseTitle(expense)}</td>
                           <td className="py-3 px-2 text-gray-500 text-xs">{expense.vendor_name ?? "-"}</td>
                           <td className="py-3 px-2 text-right text-gray-700 font-semibold">
                             {formatCurrency(expense.amount)}
@@ -1171,7 +1181,7 @@ export default function ProjectExpensesPage() {
                     )}
 
                     <div className="space-y-1">
-                      <Label className="text-xs">집행일자</Label>
+                      <Label className="text-xs">세금계산서 발행일자</Label>
                       <Input type="date" value={editForm.expenseDate} onChange={e => setEditForm(f => ({ ...f, expenseDate: e.target.value }))} />
                     </div>
 

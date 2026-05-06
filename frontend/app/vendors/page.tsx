@@ -312,10 +312,8 @@ export default function VendorsPage() {
                   <Label>업체명 *</Label>
                   <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="예: 문구스토어" />
                 </div>
-                <div className="space-y-1.5 col-span-2">
-                  <Label>업체 구분 *</Label>
+                <div className="hidden">
                   <select
-                    className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm"
                     value={form.vendor_category}
                     onChange={(e) => setForm((f) => ({ ...f, vendor_category: e.target.value as VendorCategory }))}
                   >
@@ -379,9 +377,6 @@ export default function VendorsPage() {
                       <div className="space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-semibold text-gray-900">{vendor.name}</p>
-                          <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
-                            {vendor.vendor_category}
-                          </span>
                           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">
                             전사 공통
                           </span>

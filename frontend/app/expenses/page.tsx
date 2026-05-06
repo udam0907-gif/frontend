@@ -14,6 +14,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Info } from "lucide-react";
 import Link from "next/link";
 import { formatCurrency } from "@/lib/utils";
+import type { ExpenseItem } from "@/lib/types";
+
+function formatExpenseTitle(expense: ExpenseItem): string {
+  if (expense.category_type === "materials") {
+    const items = expense.input_data?.line_items;
+    if (items && items.length > 1 && items[0]?.item_name) {
+      return `${items[0].item_name} 외`;
+    }
+  }
+  return expense.title;
+}
 
 export default function AllExpensesPage() {
   const [projectFilter, setProjectFilter] = useState("");
@@ -107,7 +118,7 @@ export default function AllExpensesPage() {
                     </span>
                     <div>
                       <p className="text-sm font-semibold text-gray-800">
-                        {expense.title}
+                        {formatExpenseTitle(expense)}
                       </p>
                       {expense.vendor_name && (
                         <p className="text-xs text-gray-400 mt-0.5">

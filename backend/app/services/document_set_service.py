@@ -416,7 +416,7 @@ class DocumentSetService:
         ext = Path(file_path).suffix.lower()
         if ext in (".xlsx", ".xls"):
             try:
-                _cell_map = await self._get_cell_map_from_pool(vendor, db)
+                _cell_map = await self._get_cell_map_from_pool(vendor, db, doc_type=doc_type.value)
                 field_map = {**field_map, "_cell_map": _cell_map, "_mapping_status": "mapped"}
             except MappingNotFoundError as _e:
                 return DocSetItem(
@@ -975,6 +975,7 @@ class DocumentSetService:
         self,
         vendor: Vendor,
         db: AsyncSession,
+        doc_type: str = "quote",
     ) -> dict:
         """vendor.business_number로 vendor_template_pool 조회 → cell_map 반환.
 
@@ -992,9 +993,14 @@ class DocumentSetService:
             )
         )
         _pool = _result.scalar_one_or_none()
-        if _pool is None or _pool.cell_map is None:
+        if doc_type == "transaction_statement":
+            _cm = _pool.transaction_cell_map if _pool else None
+        else:
+            _cm = _pool.cell_map if _pool else None
+        if _pool is None or _cm is None:
             raise MappingNotFoundError(
-                f"업체 '{vendor.name}' ({vendor.business_number})의 cell_map이 없습니다. "
-                "업체 관리에서 양식 파일을 다시 업로드하여 매핑을 완료하세요."
+                f"업체 '{vendor.name}' ({vendor.business_number})의 "
+                f"{doc_type} cell_map이 없습니다. "
+                "업체 관리에서 양식 파일을 다시 업로드하세요."
             )
-        return _pool.cell_map
+        return _cm

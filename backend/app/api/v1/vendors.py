@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -81,7 +81,9 @@ async def list_vendors(
 ) -> list[Vendor]:
     stmt = select(Vendor)
     if project_id is not None:
-        stmt = stmt.where(Vendor.project_id == project_id)
+        stmt = stmt.where(
+            or_(Vendor.project_id == project_id, Vendor.project_id.is_(None))
+        )
     stmt = stmt.order_by(Vendor.created_at.desc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
@@ -212,6 +214,10 @@ async def upload_vendor_file(
                 _cell_map = _remap.get("cell_map", {})
 
                 if _cell_map:
+                    from sqlalchemy.orm.attributes import flag_modified
+
+                    _target_attr = "cell_map" if file_type == "quote_template" else "transaction_cell_map"
+
                     _pool_res = await db.execute(
                         select(VendorTemplatePool).where(
                             VendorTemplatePool.vendor_business_number == vendor.business_number
@@ -219,27 +225,32 @@ async def upload_vendor_file(
                     )
                     _pool = _pool_res.scalar_one_or_none()
                     if _pool:
-                        _pool.cell_map = _cell_map
-                        _pool.field_map = {
-                            **_pool.field_map,
-                            "_cell_map": _cell_map,
-                            "_mapping_status": "auto_mapped",
-                        }
-                    else:
-                        _pool = VendorTemplatePool(
-                            id=uuid.uuid4(),
-                            vendor_business_number=vendor.business_number,
-                            vendor_name=vendor.name,
-                            file_format=_ext.lstrip("."),
-                            layout_map={},
-                            render_profile={},
-                            field_map={
+                        setattr(_pool, _target_attr, _cell_map)
+                        if file_type == "quote_template":
+                            _pool.field_map = {
+                                **_pool.field_map,
                                 "_cell_map": _cell_map,
                                 "_mapping_status": "auto_mapped",
-                            },
-                            cell_map=_cell_map,
-                            sample_file_path=file_path,
-                        )
+                            }
+                        flag_modified(_pool, _target_attr)
+                    else:
+                        _new_kwargs: dict = {
+                            "id": uuid.uuid4(),
+                            "vendor_business_number": vendor.business_number,
+                            "vendor_name": vendor.name,
+                            "file_format": _ext.lstrip("."),
+                            "layout_map": {},
+                            "render_profile": {},
+                            "field_map": {},
+                            "sample_file_path": file_path,
+                        }
+                        _new_kwargs[_target_attr] = _cell_map
+                        if file_type == "quote_template":
+                            _new_kwargs["field_map"] = {
+                                "_cell_map": _cell_map,
+                                "_mapping_status": "auto_mapped",
+                            }
+                        _pool = VendorTemplatePool(**_new_kwargs)
                         db.add(_pool)
                     await db.flush()
                     logger.info(

@@ -497,6 +497,7 @@ export interface CompanySettings {
   company_bank_copy_path: string | null;
   company_quote_template_path: string | null;
   company_transaction_statement_template_path: string | null;
+  employee_count: number | null;
   file_statuses: Record<CompanySettingsUploadType, CompanySettingsFileStatus>;
   created_at: string | null;
   updated_at: string | null;
@@ -518,6 +519,7 @@ export interface CompanySettingsUpdate {
   company_bank_copy_path?: string;
   company_quote_template_path?: string;
   company_transaction_statement_template_path?: string;
+  employee_count?: number | null;
 }
 
 export interface CompanySettingsExtractedFields {

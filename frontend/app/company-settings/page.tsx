@@ -35,6 +35,7 @@ const emptyForm: CompanySettingsUpdate = {
   fax: "",
   email: "",
   seal_image_path: "",
+  employee_count: null,
 };
 
 const fileLabels: Record<CompanySettingsUploadType, string> = {
@@ -228,6 +229,7 @@ export default function CompanySettingsPage() {
       fax: data.fax ?? "",
       email: data.email ?? "",
       seal_image_path: data.seal_image_path ?? "",
+      employee_count: data.employee_count ?? null,
       company_business_registration_path: data.company_business_registration_path ?? "",
       company_bank_copy_path: data.company_bank_copy_path ?? "",
       company_quote_template_path: data.company_quote_template_path ?? "",
@@ -681,6 +683,22 @@ export default function CompanySettingsPage() {
               )}
             </div>
             <Input id="email" value={form.email ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="employee_count">직원 수</Label>
+            <Input
+              id="employee_count"
+              type="number"
+              min={0}
+              value={form.employee_count ?? ""}
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  employee_count: e.target.value === "" ? null : Number(e.target.value),
+                }))
+              }
+              placeholder="예: 10"
+            />
           </div>
           <div className="sm:col-span-2 flex justify-end">
             <Button onClick={handleSave} disabled={saveMutation.isPending || isLoading}>

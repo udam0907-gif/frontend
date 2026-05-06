@@ -29,6 +29,7 @@ class CompanySettingUpsert(BaseModel):
     company_bank_copy_path: str | None = None
     company_quote_template_path: str | None = None
     company_transaction_statement_template_path: str | None = None
+    employee_count: int | None = None
 
 
 class CompanySettingRead(BaseModel):
@@ -50,6 +51,7 @@ class CompanySettingRead(BaseModel):
     company_bank_copy_path: str | None = None
     company_quote_template_path: str | None = None
     company_transaction_statement_template_path: str | None = None
+    employee_count: int | None = None
     file_statuses: dict[str, CompanySettingFileStatus] = {}
     created_at: datetime | None = None
     updated_at: datetime | None = None

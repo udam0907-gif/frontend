@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import UUID, String, Text
+from sqlalchemy import UUID, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -35,3 +35,4 @@ class CompanySetting(Base, TimestampMixin):
     company_bank_copy_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     company_quote_template_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     company_transaction_statement_template_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    employee_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

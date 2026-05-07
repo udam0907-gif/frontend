@@ -129,6 +129,20 @@ def _make_budget_checkbox(category_type: CategoryType) -> str:
     )
 
 
+def synthesize_recipient_with_honorific(ctx: dict) -> None:
+    """
+    ctx에 recipient_with_honorific = "{회사명} 귀하" 합성 (in-place).
+
+    동우/케이테크/신라정밀 등 한 셀에 「OOO 귀하」를 통째로 넣는 양식 지원용.
+    PLACEHOLDER_TO_KEY의 "(공급받는자 상호+귀하)" → recipient_with_honorific 키와 매칭.
+
+    회사명 우선순위: recipient_company_name → our_company_name. 둘 다 없으면 키 미생성.
+    """
+    name = ctx.get("recipient_company_name") or ctx.get("our_company_name") or ""
+    if name:
+        ctx["recipient_with_honorific"] = f"{name} 귀하"
+
+
 # 내부 템플릿(과제 공통 양식)에서 가져오는 문서 (위에 없는 모든 나머지)
 # = Template 테이블에서 조회
 
@@ -820,6 +834,9 @@ class DocumentSetService:
             ctx["귀하"] = our
             ctx["귀중"] = our
             ctx["수신처"] = our
+
+        # 받는자 회사명 + 「귀하」 결합 (한 셀짜리 양식 — 동우/케이테크/신라정밀 등)
+        synthesize_recipient_with_honorific(ctx)
 
         return ctx
 

@@ -111,6 +111,15 @@ PLACEHOLDER_TO_KEY: dict[str, str] = {
     "(공급자 메일)": "supplier_email",
     "(공급자 전화)": "supplier_phone",
     "(공급자 팩스)": "supplier_fax",
+    # 작성일자 분리 셀 fallback (mapper가 라벨 셀 잘못 매핑 시 라벨 필터로
+    # 제거된 키를 사용자 명시 placeholder로 다시 채울 수 있도록)
+    "(작성 년)": "issue_date_year",
+    "(작성 월)": "issue_date_month",
+    "(작성 일)": "issue_date_day",
+    # 합계금액 자릿수 분리 양식 시작 셀 마커 (가장 큰 자리 = 억자리 셀)
+    "(합계금액 자릿수 시작)": "amount_digit_breakdown_start",
+    # 받는자 회사명 + 귀하 결합 (한 셀에 「OOO 귀하」 표기 — 동우/케이테크/신라정밀 등)
+    "(공급받는자 상호+귀하)": "recipient_with_honorific",
 }
 
 

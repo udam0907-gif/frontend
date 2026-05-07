@@ -141,9 +141,29 @@ class TestMergePlaceholderIntoCellMap:
 
 
 class TestPlaceholderToKeyDict:
-    def test_has_18_entries(self) -> None:
-        assert len(PLACEHOLDER_TO_KEY) == 18
+    def test_has_23_entries(self) -> None:
+        # v6: 작성일 3개 + 자릿수 시작 1개 추가 (18 → 22)
+        # v7: 받는자+귀하 결합 1개 추가 (22 → 23)
+        assert len(PLACEHOLDER_TO_KEY) == 23
 
     def test_recipient_email_phone_present(self) -> None:
         assert PLACEHOLDER_TO_KEY["(공급받는자 메일)"] == "recipient_email"
         assert PLACEHOLDER_TO_KEY["(공급받는자 전화)"] == "recipient_phone"
+
+    def test_v6_issue_date_keys_present(self) -> None:
+        assert PLACEHOLDER_TO_KEY["(작성 년)"] == "issue_date_year"
+        assert PLACEHOLDER_TO_KEY["(작성 월)"] == "issue_date_month"
+        assert PLACEHOLDER_TO_KEY["(작성 일)"] == "issue_date_day"
+
+    def test_v6_amount_digit_breakdown_key_present(self) -> None:
+        assert (
+            PLACEHOLDER_TO_KEY["(합계금액 자릿수 시작)"]
+            == "amount_digit_breakdown_start"
+        )
+
+    def test_v7_recipient_with_honorific_key_present(self) -> None:
+        assert "(공급받는자 상호+귀하)" in PLACEHOLDER_TO_KEY
+        assert (
+            PLACEHOLDER_TO_KEY["(공급받는자 상호+귀하)"]
+            == "recipient_with_honorific"
+        )

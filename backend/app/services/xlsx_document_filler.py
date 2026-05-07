@@ -6,12 +6,50 @@ from pathlib import Path
 from typing import Any
 
 from openpyxl.styles import Font
+from openpyxl.utils.cell import column_index_from_string, get_column_letter
 
 from app.config import settings
 from app.core.exceptions import DocumentGenerationError, MappingNotFoundError
 from app.core.logging import get_logger
+from app.services.xlsx_cell_mapper import _is_label_cell
 
 logger = get_logger(__name__)
+
+
+def _safe_set_cell(
+    ws: Any,
+    anchor_addr: str,
+    value: Any,
+    label_skip_log: list[str] | None = None,
+    formula_skip_log: list[str] | None = None,
+) -> bool:
+    """
+    cell_map 매핑 결과 셀에 값 박기 직전 두 가지 가드 적용:
+
+    1) 라벨 가드 — mapper가 매핑한 셀이 _anchor()로 병합 좌상단으로 보정됐을 때,
+       그 좌상단이 라벨(예: B21=TOTAL, B12=년)이면 박지 않고 보존.
+    2) 수식 가드 — 양식의 자동계산 수식(예: N15=`=J15*L15`)이 있는 셀에는
+       하드코딩 값을 박지 않고 수식 보존 → Excel이 자동 재계산.
+
+    openpyxl의 load_workbook 기본값(data_only=False)에서 수식은 `=`로 시작하는
+    문자열로 노출되므로 startswith('=')로 판정 가능.
+
+    Returns: True=박음, False=라벨/수식이라 거부
+    """
+    cell = ws[anchor_addr]
+    existing = cell.value
+    # 1) 라벨 가드
+    if existing and isinstance(existing, str) and _is_label_cell(existing):
+        if label_skip_log is not None:
+            label_skip_log.append(f"{anchor_addr}='{existing}' (label, skip)")
+        return False
+    # 2) 수식 가드
+    if existing and isinstance(existing, str) and existing.startswith("="):
+        if formula_skip_log is not None:
+            formula_skip_log.append(f"{anchor_addr}='{existing}' (formula, skip)")
+        return False
+    _set_cell(ws, anchor_addr, value)
+    return True
 
 
 def _set_cell(ws: Any, anchor_addr: str, value: Any) -> None:
@@ -33,6 +71,98 @@ def _set_cell(ws: Any, anchor_addr: str, value: Any) -> None:
             italic=cell.font.italic,
             color="FF000000",
         )
+
+
+def _is_digit_breakdown_layout(ws: Any, start_ref: str) -> bool:
+    """
+    start_ref 셀의 한 행 위가 자릿수 라벨(억/천/백/십/만/일) 6개 이상이면
+    합계금액 자릿수 분리 양식으로 판정.
+
+    옵토마린 양식 예: E12-M12 라벨(억/천/백/십/만/천/백/십/일), E13 데이터 시작.
+    """
+    col_letter = ''.join(c for c in start_ref if c.isalpha())
+    row_str = ''.join(c for c in start_ref if c.isdigit())
+    if not col_letter or not row_str:
+        return False
+    row = int(row_str)
+    if row <= 1:
+        return False
+    label_row = row - 1
+    DIGIT_LABELS = {"억", "천", "백", "십", "만", "일"}
+    start_col = column_index_from_string(col_letter)
+    label_count = 0
+    for i in range(9):
+        ref = f"{get_column_letter(start_col + i)}{label_row}"
+        try:
+            v = ws[ref].value
+        except Exception:
+            continue
+        if v and str(v).strip() in DIGIT_LABELS:
+            label_count += 1
+    return label_count >= 6
+
+
+def _fill_amount_digits(
+    ws: Any, total_amount: int | None, start_cell: str, num_digits: int = 9
+) -> list[str]:
+    """
+    합계금액을 자릿수별로 분리해서 num_digits개 셀에 가로로 박음.
+
+    양식 예 (옵토마린 거래명세서): 행12=라벨(억/천/백/십/만/천/백/십/일),
+    행13=값. _fill_amount_digits(ws, 275000, "E13") → E13:M13 의 채움 결과는
+    아래 정책 참조.
+
+    0 표시 정책 (γ — 가장 큰 유효 자리부터 끝까지 박음):
+      - 9자리 zero-pad 문자열에서 첫 비-0 자리(first_nonzero) 찾는다.
+      - first_nonzero 이전 자리는 빈칸(None) — 양식 미관 우선.
+      - first_nonzero 이후 자리는 0 포함 모두 정수로 박기 — 가독성/회계 관행.
+      - 예) 275,000 → "000275000" → E,F,G=빈칸, H=2, I=7, J=5, K=0, L=0, M=0
+      - 예) 5 → "000000005" → M=5, 나머지 빈칸
+      - 예) 0 → fallback: M=0, 나머지 빈칸 (마지막 자리 0 표시)
+      - 예) 1억 → "100000000" → E~M 모두 박힘 (1,0,0,0,0,0,0,0,0)
+
+    Args:
+        ws: 워크시트
+        total_amount: 합계 (정수). None/음수면 아무것도 안 함.
+        start_cell: 가장 큰 자릿수 셀 좌표 (예: "E13").
+        num_digits: 자릿수 개수 (기본 9).
+
+    Returns:
+        시도한 셀 좌표 리스트 (None 할당 셀도 포함).
+    """
+    if total_amount is None or total_amount < 0:
+        return []
+
+    col_letter = ''.join(c for c in start_cell if c.isalpha())
+    if not col_letter:
+        return []
+    row_str = ''.join(c for c in start_cell if c.isdigit())
+    if not row_str:
+        return []
+    row = int(row_str)
+    start_col = column_index_from_string(col_letter)
+
+    # num_digits 자리 0-padded 문자열 (양식 한계 초과 시 하위 num_digits 자리만)
+    s = str(int(total_amount)).zfill(num_digits)
+    if len(s) > num_digits:
+        s = s[-num_digits:]
+
+    # γ 정책: 첫 비-0 자리 찾기. 0원이면 마지막 자리에 0 표시 (fallback).
+    first_nonzero: int
+    try:
+        first_nonzero = next(i for i, d in enumerate(s) if d != "0")
+    except StopIteration:
+        first_nonzero = len(s) - 1  # 0원 — 마지막 자리에만 0
+
+    filled: list[str] = []
+    for i, digit in enumerate(s):
+        ref = f"{get_column_letter(start_col + i)}{row}"
+        if i < first_nonzero:
+            ws[ref].value = None  # 가장 큰 유효 자리 이전은 빈칸
+        else:
+            ws[ref].value = int(digit)  # 0 포함 모두 박음
+        filled.append(ref)
+    return filled
 
 
 def _parse_date(date_str: str):
@@ -112,6 +242,10 @@ class XlsxDocumentFiller:
         "recipient_address": ["recipient_address", "our_company_address"],
         "recipient_business_type": ["recipient_business_type", "our_company_business_type"],
         "recipient_business_item": ["recipient_business_item", "our_company_business_item"],
+        # 공급받는자 메일/전화/팩스 — context엔 our_company_* 로 들어옴 (company_setting에서)
+        "recipient_email": ["recipient_email", "our_company_email", "company_email"],
+        "recipient_phone": ["recipient_phone", "our_company_phone", "company_phone"],
+        "recipient_fax":   ["recipient_fax", "our_company_fax", "company_fax"],
         # 날짜
         "issue_date": ["issue_date", "execution_date", "expense_date", "작성일", "견적일"],
         # 품목명
@@ -205,18 +339,20 @@ class XlsxDocumentFiller:
         skipped: list[str] = []
         self._fill_flat(ws, cell_map, context, written, skipped)
 
-        # 3.5. 출력 파일에서 비(非)주력 시트 제거
-        # 템플릿 파일의 비교용·참고용 2차 시트(예: '비교1_동서켐', 'Sheet2' 등)에
-        # 구 견적 데이터가 잔존해 출력 파일에 유출되는 사고를 차단한다.
-        if sheet_name and sheet_name in wb.sheetnames and len(wb.sheetnames) > 1:
-            for _sname in list(wb.sheetnames):
-                if _sname != sheet_name:
-                    del wb[_sname]
-            logger.info(
-                "xlsx_secondary_sheets_removed",
-                kept=sheet_name,
-                total_before=len(wb.sheetnames) + (len(wb.sheetnames) - 1),
-            )
+        # 3.5. (v5) 비주력 시트는 보존 — workbook 메타/drawing 관계/named range 깨짐 방지
+        # 데이터 누출 위험은 _fill_flat이 매칭된 단일 ws에만 쓴다는 사실 + Gate 2 시트
+        # 화이트리스트 가드로 차단. 매칭된 시트만 활성 탭으로 설정해 사용자가 파일 열 때
+        # 거래명세서 시트가 먼저 보이게 한다.
+        if sheet_name and sheet_name in wb.sheetnames:
+            wb.active = wb.sheetnames.index(sheet_name)
+            if len(wb.sheetnames) > 1:
+                _other = [s for s in wb.sheetnames if s != sheet_name]
+                logger.info(
+                    "xlsx_secondary_sheets_preserved",
+                    target=sheet_name,
+                    other_sheets=_other,
+                    other_count=len(_other),
+                )
 
         # 4. 저장
         wb.save(output_path)
@@ -329,9 +465,14 @@ class XlsxDocumentFiller:
                                     f"anchor {anchor_addr} already claimed by {_row_claimed_anchors[anchor_addr]}"
                                 )
                                 continue
-                            _set_cell(ws, anchor_addr, val)
-                            _row_claimed_anchors[anchor_addr] = field_key
-                            written.append(f"line_items[{idx}].{field_key}={col_letter}{row}")
+                            if _safe_set_cell(ws, anchor_addr, val):
+                                _row_claimed_anchors[anchor_addr] = field_key
+                                written.append(f"line_items[{idx}].{field_key}={col_letter}{row}")
+                            else:
+                                skipped.append(
+                                    f"line_items[{idx}].{field_key}({col_letter}{row}→{anchor_addr}): "
+                                    f"label/formula protected"
+                                )
                         except Exception as e:
                             skipped.append(f"line_items[{idx}].{field_key}({col_letter}{row}): {e}")
                 # items_table 컬럼 키는 단일 셀 루프에서 제외
@@ -357,24 +498,64 @@ class XlsxDocumentFiller:
             if date_obj is not None:
                 if year_cell:
                     try:
-                        _set_cell(ws, _anchor(ws, year_cell), date_obj.year)
-                        written.append(f"issue_date_year={year_cell}")
+                        a = _anchor(ws, year_cell)
+                        if _safe_set_cell(ws, a, date_obj.year):
+                            written.append(f"issue_date_year={year_cell}")
+                        else:
+                            skipped.append(f"issue_date_year({year_cell}→{a}): label cell protected")
                     except Exception as e:
                         skipped.append(f"issue_date_year({year_cell}): {e}")
                 if month_cell:
                     try:
-                        _set_cell(ws, _anchor(ws, month_cell), date_obj.month)
-                        written.append(f"issue_date_month={month_cell}")
+                        a = _anchor(ws, month_cell)
+                        if _safe_set_cell(ws, a, date_obj.month):
+                            written.append(f"issue_date_month={month_cell}")
+                        else:
+                            skipped.append(f"issue_date_month({month_cell}→{a}): label cell protected")
                     except Exception as e:
                         skipped.append(f"issue_date_month({month_cell}): {e}")
                 if day_cell:
                     try:
-                        _set_cell(ws, _anchor(ws, day_cell), date_obj.day)
-                        written.append(f"issue_date_day={day_cell}")
+                        a = _anchor(ws, day_cell)
+                        if _safe_set_cell(ws, a, date_obj.day):
+                            written.append(f"issue_date_day={day_cell}")
+                        else:
+                            skipped.append(f"issue_date_day({day_cell}→{a}): label cell protected")
                     except Exception as e:
                         skipped.append(f"issue_date_day({day_cell}): {e}")
             # 분리 처리 여부와 무관하게 issue_date 단일 키는 단일 셀 루프에서 제외
             skip_keys.add("issue_date")
+
+        # ── 합계금액 자릿수 분리 처리 ────────────────────────────────────
+        # 우선순위 1: cell_map.amount_digit_breakdown_start (사용자 명시 marker)
+        # 우선순위 2: total_amount 셀의 위 행이 자릿수 라벨(억/천/백/십/만/일)이면 자동 감지
+        digit_start = cell_map.get("amount_digit_breakdown_start")
+        if not digit_start:
+            ta_cell = cell_map.get("total_amount")
+            if (
+                ta_cell
+                and isinstance(ta_cell, str)
+                and _is_digit_breakdown_layout(ws, ta_cell)
+            ):
+                digit_start = ta_cell
+        if digit_start and isinstance(digit_start, str):
+            total_amount_value = (
+                context.get("total_amount")
+                or context.get("amount")
+                or 0
+            )
+            try:
+                amt = int(total_amount_value)
+            except (TypeError, ValueError):
+                amt = 0
+            if amt > 0:
+                filled = _fill_amount_digits(ws, amt, digit_start)
+                if filled:
+                    written.append(f"amount_digits[{digit_start}]={len(filled)}cells")
+                    # 자릿수로 분리됐으니 total_amount 단일 셀 박기 스킵
+                    skip_keys.add("total_amount")
+            # marker 키는 단일 셀 루프에서 항상 제외 (값이 셀 좌표라 직접 박으면 안 됨)
+            skip_keys.add("amount_digit_breakdown_start")
 
         # ── 단일 셀 1:1 매핑 (기존 로직 그대로) ─────────────────────────
         for cell_key, cell_addr in cell_map.items():
@@ -426,8 +607,11 @@ class XlsxDocumentFiller:
                 pass
 
             try:
-                _set_cell(ws, _anchor(ws, cell_addr), value)
-                written.append(f"{cell_key}={cell_addr}")
+                anchor_addr = _anchor(ws, cell_addr)
+                if _safe_set_cell(ws, anchor_addr, value):
+                    written.append(f"{cell_key}={cell_addr}")
+                else:
+                    skipped.append(f"{cell_key}({cell_addr}→{anchor_addr}): label cell protected")
             except Exception as e:
                 logger.warning("xlsx_cell_set_failed", cell=cell_addr, error=str(e))
                 skipped.append(f"{cell_key}({cell_addr}): {e}")

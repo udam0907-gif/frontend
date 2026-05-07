@@ -7,10 +7,159 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from openpyxl import load_workbook
+
 from app.core.logging import get_logger
 from app.services.llm_service import LLMService
 
 logger = get_logger(__name__)
+
+
+# 한국어 라벨 텍스트 패턴 — cell_map이 라벨 셀을 가리키면 매핑 제거
+LABEL_PATTERNS = [
+    r"^등록\s*번호$", r"^상\s*호$", r"^대\s*표\s*자$",
+    r"^주\s*소$", r"^업\s*태$", r"^종\s*목$",
+    r"^메\s*일$", r"^전\s*화$", r"^팩\s*스$",
+    r"^년$", r"^월$", r"^일$",
+    r"^억$", r"^천$", r"^백$", r"^십$", r"^만$",
+    r"^합\s*계\s*금\s*액$", r"^합\s*계$",
+    r"^TOTAL$", r"^Total$",
+    r"^품\s*목$", r"^품\s*명$", r"^단\s*위$", r"^수\s*량$",
+    r"^단\s*가", r"^금\s*액", r"^규\s*격$", r"^비\s*고$",
+    r"^공\s*급\s*자$", r"^공\s*급\s*받\s*는\s*자$",
+    r"^작\s*성$", r"^발\s*행", r"^일\s*자$",
+    r"^전\s*잔\s*액$", r"^현\s*잔\s*액$", r"^입\s*금\s*액$",
+    r"^NO\.?$", r"^No\.?$",
+]
+
+
+def _is_label_cell(text: Any) -> bool:
+    """셀 값이 라벨 텍스트인지 판정."""
+    if not text or not isinstance(text, str):
+        return False
+    cleaned = text.strip()
+    if not cleaned:
+        return False
+    for pattern in LABEL_PATTERNS:
+        if re.match(pattern, cleaned):
+            return True
+    return False
+
+
+def filter_label_cell_mappings(
+    cell_map: dict, template_path: str, sheet_name: str | None = None
+) -> tuple[dict, list[str]]:
+    """
+    cell_map에서 라벨 셀을 가리키는 매핑을 제거.
+
+    - sheet_name, _meta 같은 메타 키는 보존
+    - 셀 참조가 아닌 값(중첩 dict 등)도 보존
+    - openpyxl로 셀 값을 읽어 LABEL_PATTERNS와 매칭 시 매핑 제거
+
+    Returns: (filtered_cell_map, removed_keys_for_logging)
+    """
+    if not cell_map or not template_path:
+        return cell_map, []
+
+    try:
+        wb = load_workbook(template_path, data_only=False)
+        ws = wb[sheet_name] if sheet_name and sheet_name in wb.sheetnames else wb.active
+    except Exception:
+        return cell_map, []
+
+    filtered: dict = {}
+    removed: list[str] = []
+
+    for key, cell_ref in cell_map.items():
+        # 메타 키는 유지 (sheet_name, _meta, _cell_map 등)
+        if key.startswith("_") or key == "sheet_name" or not isinstance(cell_ref, str):
+            filtered[key] = cell_ref
+            continue
+        try:
+            cell_value = ws[cell_ref].value
+        except Exception:
+            filtered[key] = cell_ref
+            continue
+
+        if _is_label_cell(cell_value):
+            removed.append(f"{key}={cell_ref} (라벨 '{cell_value}')")
+            continue
+        filtered[key] = cell_ref
+
+    wb.close()
+    return filtered, removed
+
+
+# placeholder 텍스트 → cell_map 키 변환 사전
+# 양식에 사용자가 직접 박은 placeholder를 시스템이 직접 추출 (mapper LLM 누락 보강)
+PLACEHOLDER_TO_KEY: dict[str, str] = {
+    "(공급받는자 등록번호)": "recipient_business_number",
+    "(공급받는자 상호)": "recipient_company_name",
+    "(공급받는자 대표자)": "recipient_representative",
+    "(공급받는자 주소)": "recipient_address",
+    "(공급받는자 업태)": "recipient_business_type",
+    "(공급받는자 종목)": "recipient_business_item",
+    "(공급받는자 메일)": "recipient_email",
+    "(공급받는자 전화)": "recipient_phone",
+    "(공급받는자 팩스)": "recipient_fax",
+    "(공급자 등록번호)": "supplier_business_number",
+    "(공급자 상호)": "supplier_company_name",
+    "(공급자 대표자)": "supplier_representative",
+    "(공급자 주소)": "supplier_address",
+    "(공급자 업태)": "supplier_business_type",
+    "(공급자 종목)": "supplier_business_item",
+    "(공급자 메일)": "supplier_email",
+    "(공급자 전화)": "supplier_phone",
+    "(공급자 팩스)": "supplier_fax",
+}
+
+
+def scan_placeholder_cells(
+    template_path: str, sheet_name: str | None = None
+) -> dict[str, str]:
+    """
+    워크북 전체 셀을 스캔하여 PLACEHOLDER_TO_KEY 의 텍스트가 있는 셀의 좌표를 수집.
+
+    Returns: {"recipient_email": "Q9", ...} 형태의 사전 (없으면 빈 dict)
+    """
+    if not template_path:
+        return {}
+    try:
+        wb = load_workbook(template_path, data_only=False)
+        ws = wb[sheet_name] if sheet_name and sheet_name in wb.sheetnames else wb.active
+    except Exception:
+        return {}
+
+    found: dict[str, str] = {}
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value is None:
+                continue
+            text = str(cell.value).strip()
+            key = PLACEHOLDER_TO_KEY.get(text)
+            if key and key not in found:
+                found[key] = cell.coordinate
+    wb.close()
+    return found
+
+
+def merge_placeholder_into_cell_map(
+    cell_map: dict, placeholder_map: dict
+) -> tuple[dict, list[str]]:
+    """
+    placeholder 스캔 결과를 cell_map에 병합.
+    이미 존재하는 키는 덮어쓰지 않음 (mapper 결과 우선).
+
+    Returns: (merged_cell_map, added_keys_for_logging)
+    """
+    merged = dict(cell_map) if cell_map else {}
+    added: list[str] = []
+    for key, cell_ref in (placeholder_map or {}).items():
+        if key not in merged:
+            merged[key] = cell_ref
+            added.append(f"{key}={cell_ref}")
+    return merged, added
+
 
 _SYSTEM_PROMPT = """당신은 한국 정부 R&D 과제용 엑셀 견적서/거래명세서 서식 분석 전문가입니다.
 주어진 엑셀 셀 구조를 분석하여 「동적 입력 영역」 필드의 정확한 셀 위치(좌표)를 찾아냅니다.
@@ -163,6 +312,32 @@ class XlsxCellMapper:
             )
 
             cell_map = self._parse_response(response.content)
+
+            # 라벨 셀 보호 후처리 — mapper가 라벨 셀에 매핑한 키 제거
+            sheet_name = cell_map.get("sheet_name") if isinstance(cell_map, dict) else None
+            cell_map, removed_label_mappings = filter_label_cell_mappings(
+                cell_map, actual_path, sheet_name
+            )
+            if removed_label_mappings:
+                logger.warning(
+                    "cell_map_label_cells_filtered",
+                    file=file_path,
+                    removed_count=len(removed_label_mappings),
+                    removed=removed_label_mappings,
+                )
+
+            # placeholder 직접 스캔 — mapper가 못 잡는 키 (메일/전화/팩스 등) 보강
+            placeholder_map = scan_placeholder_cells(actual_path, sheet_name)
+            cell_map, added_placeholder_mappings = merge_placeholder_into_cell_map(
+                cell_map, placeholder_map
+            )
+            if added_placeholder_mappings:
+                logger.info(
+                    "cell_map_placeholder_augmented",
+                    file=file_path,
+                    added_count=len(added_placeholder_mappings),
+                    added=added_placeholder_mappings,
+                )
 
             logger.info(
                 "xlsx_cell_map_analyzed",

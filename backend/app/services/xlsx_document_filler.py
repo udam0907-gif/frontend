@@ -5,11 +5,34 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from openpyxl.styles import Font
+
 from app.config import settings
 from app.core.exceptions import DocumentGenerationError, MappingNotFoundError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _set_cell(ws: Any, anchor_addr: str, value: Any) -> None:
+    """
+    셀에 값을 박고 폰트 색만 검정으로 리셋.
+    family/size/bold/italic은 보존하여 양식 미관 유지.
+
+    이유: mapper가 이전에 라벨/placeholder 셀을 가리켰던 경우 그 셀의 폰트가
+    보라(라벨용)/회색(placeholder용)인데, 데이터를 그대로 넣으면 색이 transfer됨.
+    값 박을 때만 검정으로 리셋해 데이터 가독성 보장.
+    """
+    cell = ws[anchor_addr]
+    cell.value = value
+    if cell.font:
+        cell.font = Font(
+            name=cell.font.name,
+            size=cell.font.size,
+            bold=cell.font.bold,
+            italic=cell.font.italic,
+            color="FF000000",
+        )
 
 
 def _parse_date(date_str: str):
@@ -306,7 +329,7 @@ class XlsxDocumentFiller:
                                     f"anchor {anchor_addr} already claimed by {_row_claimed_anchors[anchor_addr]}"
                                 )
                                 continue
-                            ws[anchor_addr] = val
+                            _set_cell(ws, anchor_addr, val)
                             _row_claimed_anchors[anchor_addr] = field_key
                             written.append(f"line_items[{idx}].{field_key}={col_letter}{row}")
                         except Exception as e:
@@ -334,19 +357,19 @@ class XlsxDocumentFiller:
             if date_obj is not None:
                 if year_cell:
                     try:
-                        ws[_anchor(ws, year_cell)] = date_obj.year
+                        _set_cell(ws, _anchor(ws, year_cell), date_obj.year)
                         written.append(f"issue_date_year={year_cell}")
                     except Exception as e:
                         skipped.append(f"issue_date_year({year_cell}): {e}")
                 if month_cell:
                     try:
-                        ws[_anchor(ws, month_cell)] = date_obj.month
+                        _set_cell(ws, _anchor(ws, month_cell), date_obj.month)
                         written.append(f"issue_date_month={month_cell}")
                     except Exception as e:
                         skipped.append(f"issue_date_month({month_cell}): {e}")
                 if day_cell:
                     try:
-                        ws[_anchor(ws, day_cell)] = date_obj.day
+                        _set_cell(ws, _anchor(ws, day_cell), date_obj.day)
                         written.append(f"issue_date_day={day_cell}")
                     except Exception as e:
                         skipped.append(f"issue_date_day({day_cell}): {e}")
@@ -403,7 +426,7 @@ class XlsxDocumentFiller:
                 pass
 
             try:
-                ws[_anchor(ws, cell_addr)] = value
+                _set_cell(ws, _anchor(ws, cell_addr), value)
                 written.append(f"{cell_key}={cell_addr}")
             except Exception as e:
                 logger.warning("xlsx_cell_set_failed", cell=cell_addr, error=str(e))

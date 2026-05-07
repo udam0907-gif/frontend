@@ -477,59 +477,57 @@ class DocumentSetService:
                 is_vendor_doc=True,
             )
 
-        # 비교견적 금액: meta의 compare_amount 우선, 없으면 1.1~1.5 랜덤 배율 × 100원 단위 올림
+        # 비교견적: α 정책 — 항상 라인별 랜덤 1.1~1.5 배율 적용 (사용자 입력 무시, 로깅만)
         meta = expense.metadata_ or {}
         if "compare_amount" in meta:
-            _user_amount = int(meta["compare_amount"])
-            compare_amount = math.ceil(_user_amount / 100) * 100   # 100-배수 강제
-            _random_rate = Decimal("1.1")  # note 출력용 기본값
             logger.info(
-                "comparative_amount_user_normalized",
-                user_input=_user_amount,
-                rounded=compare_amount,
+                "comparative_amount_user_input_ignored",
+                user_input=int(meta["compare_amount"]),
+                reason="α 정책 — 항상 라인별 랜덤 1.1~1.5 적용",
             )
-        else:
-            original = Decimal(str(expense.amount))
-            _random_rate = Decimal(str(round(random.uniform(1.10, 1.50), 2)))
-            _raw_amount = int((original * _random_rate).quantize(Decimal("1")))
-            compare_amount = math.ceil(_raw_amount / 100) * 100
-            logger.info(
-                "comparative_amount_calculated",
-                original=int(original),
-                rate=str(_random_rate),
-                raw=_raw_amount,
-                rounded=compare_amount,
-            )
+        _random_rate = Decimal(str(round(random.uniform(1.10, 1.50), 2)))
 
         context = dict(base_context)
-        quantity = Decimal(str(context.get("quantity") or 1))
-        compare_unit_price = compare_amount
-        if quantity not in (Decimal("0"), Decimal("0.0")):
-            try:
-                compare_unit_price = int((Decimal(str(compare_amount)) / quantity).quantize(Decimal("1")))
-            except Exception:
-                compare_unit_price = compare_amount
 
+        # 라인별로 단가·금액 재계산
         normalized_items: list[dict[str, Any]] = []
         for raw_item in context.get("line_items") or []:
             if not isinstance(raw_item, dict):
                 continue
             item = dict(raw_item)
+            orig_unit = Decimal(str(item.get("unit_price") or 0))
+            orig_qty = Decimal(str(item.get("quantity") or 1))
+            raw_unit = int((orig_unit * _random_rate).quantize(Decimal("1")))
+            new_unit = math.ceil(raw_unit / 100) * 100  # 100원 단위 올림
+            new_amount = int(new_unit * orig_qty)
             item["item_name"] = item.get("item_name") or context.get("item_name") or expense.title
-            item["quantity"] = item.get("quantity") or context.get("quantity") or 1
-            item["unit_price"] = compare_unit_price
-            item["amount"] = compare_amount
+            item["quantity"] = int(orig_qty) if orig_qty == orig_qty.to_integral_value() else float(orig_qty)
+            item["unit_price"] = new_unit
+            item["amount"] = new_amount
             normalized_items.append(item)
 
+        # 폴백: line_items 비었으면 expense.amount × rate 단일 라인
         if not normalized_items:
+            raw_unit = int((Decimal(str(expense.amount)) * _random_rate).quantize(Decimal("1")))
+            new_unit = math.ceil(raw_unit / 100) * 100
             normalized_items = [{
                 "item_name": context.get("item_name") or context.get("product_name") or expense.title,
                 "spec": context.get("spec") or "",
-                "quantity": int(quantity) if quantity else 1,
-                "unit_price": compare_unit_price,
-                "amount": compare_amount,
+                "quantity": 1,
+                "unit_price": new_unit,
+                "amount": new_unit,
                 "remark": context.get("remark") or "",
             }]
+
+        # compare_amount는 라인 amount 합계
+        compare_amount = sum(int(item["amount"]) for item in normalized_items)
+
+        logger.info(
+            "comparative_amount_per_line",
+            rate=str(_random_rate),
+            line_count=len(normalized_items),
+            total=compare_amount,
+        )
 
         context["line_items"] = normalized_items
         context["item_name"] = normalized_items[0]["item_name"]

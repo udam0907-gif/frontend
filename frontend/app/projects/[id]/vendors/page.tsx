@@ -164,6 +164,10 @@ function FileBadge({ path, label }: { path: string | null; label: string }) {
 
 interface FormState {
   name: string;
+  representative_name: string;
+  address: string;
+  business_type: string;
+  business_item: string;
   vendor_category: VendorCategory;
   business_number: string;
   contact: string;
@@ -171,6 +175,10 @@ interface FormState {
 
 const initialForm: FormState = {
   name: "",
+  representative_name: "",
+  address: "",
+  business_type: "",
+  business_item: "",
   vendor_category: "매입처",
   business_number: "",
   contact: "",
@@ -208,18 +216,13 @@ export default function ProjectVendorsPage() {
       // 현재 폼값이 비어 있을 때만 채움 (이미 입력된 값은 덮어쓰지 않음)
       setForm((prev) => {
         const next = { ...prev };
-        if (result.vendor_name && !next.name) {
-          next.name = result.vendor_name;
-          filled = true;
-        }
-        if (result.business_number && !next.business_number) {
-          next.business_number = result.business_number;
-          filled = true;
-        }
-        if (result.contact && !next.contact) {
-          next.contact = result.contact;
-          filled = true;
-        }
+        if (result.vendor_name && !next.name) { next.name = result.vendor_name; filled = true; }
+        if (result.business_number && !next.business_number) { next.business_number = result.business_number; filled = true; }
+        if (result.contact && !next.contact) { next.contact = result.contact; filled = true; }
+        if (result.representative_name && !next.representative_name) { next.representative_name = result.representative_name; filled = true; }
+        if (result.address && !next.address) { next.address = result.address; filled = true; }
+        if (result.business_type && !next.business_type) { next.business_type = result.business_type; filled = true; }
+        if (result.business_item && !next.business_item) { next.business_item = result.business_item; filled = true; }
         return next;
       });
       if (filled) {
@@ -261,7 +264,33 @@ export default function ProjectVendorsPage() {
     onError: () => setFileUploading(null),
   });
 
-  // ─── 목록 파일 업로드 ──────────────────────────────────────────────────
+  // ─── 수정 / 삭제 ────────────────────────────────────────────────────────
+
+  const [editingVendorId, setEditingVendorId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<Partial<FormState>>({});
+
+  const startEdit = (vendor: Vendor) => {
+    setEditingVendorId(vendor.id);
+    setEditForm({
+      name: vendor.name ?? "",
+      representative_name: vendor.representative_name ?? "",
+      address: vendor.address ?? "",
+      business_type: vendor.business_type ?? "",
+      business_item: vendor.business_item ?? "",
+      business_number: vendor.business_number ?? "",
+      contact: vendor.contact ?? "",
+    });
+  };
+
+  const updateMutation = useMutation({
+    mutationFn: ({ vendorId, data }: { vendorId: string; data: Partial<FormState> }) =>
+      vendorsApi.update(vendorId, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["vendors", id] });
+      setEditingVendorId(null);
+      setEditForm({});
+    },
+  });
 
   const deleteMutation = useMutation({
     mutationFn: (vendorId: string) => vendorsApi.delete(vendorId),
@@ -340,6 +369,14 @@ export default function ProjectVendorsPage() {
                   placeholder="예: 문구스토어"
                 />
               </div>
+              <div className="space-y-1.5">
+                <Label>대표자명</Label>
+                <Input
+                  value={form.representative_name}
+                  onChange={(e) => setForm((f) => ({ ...f, representative_name: e.target.value }))}
+                  placeholder="예: 윤광호"
+                />
+              </div>
               <div className="hidden">
                 <select
                   value={form.vendor_category}
@@ -365,6 +402,30 @@ export default function ProjectVendorsPage() {
                   value={form.contact}
                   onChange={(e) => setForm((f) => ({ ...f, contact: e.target.value }))}
                   placeholder="010-0000-0000"
+                />
+              </div>
+              <div className="space-y-1.5 col-span-2">
+                <Label>주소</Label>
+                <Input
+                  value={form.address}
+                  onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                  placeholder="예: 서울특별시 강남구 …"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>업태</Label>
+                <Input
+                  value={form.business_type}
+                  onChange={(e) => setForm((f) => ({ ...f, business_type: e.target.value }))}
+                  placeholder="예: 제조업"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>종목</Label>
+                <Input
+                  value={form.business_item}
+                  onChange={(e) => setForm((f) => ({ ...f, business_item: e.target.value }))}
+                  placeholder="예: 화학원료 도소매"
                 />
               </div>
             </div>
@@ -419,21 +480,82 @@ export default function ProjectVendorsPage() {
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-semibold text-gray-900">{vendor.name}</p>
+                        {vendor.representative_name && (
+                          <span className="text-xs text-gray-500">대표: {vendor.representative_name}</span>
+                        )}
                       </div>
                       <p className="text-xs text-gray-400">
                         {vendor.business_number}
                         {vendor.contact && ` · ${vendor.contact}`}
                       </p>
+                      {(vendor.business_type || vendor.business_item) && (
+                        <p className="text-xs text-gray-400">
+                          {[vendor.business_type, vendor.business_item].filter(Boolean).join(" / ")}
+                        </p>
+                      )}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-red-500 hover:text-red-700 shrink-0"
-                      onClick={() => deleteMutation.mutate(vendor.id)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    <div className="flex gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-blue-500 hover:text-blue-700"
+                        onClick={() => editingVendorId === vendor.id ? setEditingVendorId(null) : startEdit(vendor)}
+                      >
+                        {editingVendorId === vendor.id ? <X className="w-4 h-4" /> : <span className="text-xs">수정</span>}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-500 hover:text-red-700"
+                        onClick={() => deleteMutation.mutate(vendor.id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
+
+                  {/* Inline edit form */}
+                  {editingVendorId === vendor.id && (
+                    <div className="border border-blue-200 rounded-lg p-3 bg-blue-50 space-y-3">
+                      <p className="text-xs font-semibold text-blue-600">기본 정보 수정</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs">업체명 *</Label>
+                          <Input className="h-8 text-sm" value={editForm.name ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">대표자명</Label>
+                          <Input className="h-8 text-sm" value={editForm.representative_name ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, representative_name: e.target.value }))} placeholder="예: 윤광호" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">사업자번호</Label>
+                          <Input className="h-8 text-sm" value={editForm.business_number ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, business_number: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">연락처</Label>
+                          <Input className="h-8 text-sm" value={editForm.contact ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, contact: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1 col-span-2">
+                          <Label className="text-xs">주소</Label>
+                          <Input className="h-8 text-sm" value={editForm.address ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value }))} placeholder="예: 서울특별시 강남구 …" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">업태</Label>
+                          <Input className="h-8 text-sm" value={editForm.business_type ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, business_type: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">종목</Label>
+                          <Input className="h-8 text-sm" value={editForm.business_item ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, business_item: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button size="sm" disabled={updateMutation.isPending} onClick={() => updateMutation.mutate({ vendorId: vendor.id, data: editForm })}>
+                          {updateMutation.isPending ? "저장 중..." : "저장"}
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setEditingVendorId(null)}>취소</Button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* File status */}
                   <div className="flex flex-wrap gap-1.5">

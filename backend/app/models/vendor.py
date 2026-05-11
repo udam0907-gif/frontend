@@ -22,6 +22,10 @@ class Vendor(Base, TimestampMixin):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    representative_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    business_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    business_item: Mapped[str | None] = mapped_column(String(200), nullable=True)
     vendor_category: Mapped[str] = mapped_column(String(20), nullable=False)  # "매입처" | "매출처"
     business_number: Mapped[str] = mapped_column(String(20), nullable=False)
     contact: Mapped[str | None] = mapped_column(String(100), nullable=True)

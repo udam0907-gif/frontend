@@ -13,6 +13,10 @@ VendorCategory = Literal["매입처", "매출처"]
 class VendorCreate(BaseModel):
     project_id: uuid.UUID | None = None
     name: str = Field(min_length=1, max_length=255)
+    representative_name: str | None = None
+    address: str | None = None
+    business_type: str | None = None
+    business_item: str | None = None
     vendor_category: VendorCategory
     business_number: str = Field(min_length=1, max_length=20)
     contact: str | None = None
@@ -24,6 +28,10 @@ class VendorRead(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID | None
     name: str
+    representative_name: str | None
+    address: str | None
+    business_type: str | None
+    business_item: str | None
     vendor_category: str
     business_number: str
     contact: str | None
@@ -38,6 +46,10 @@ class VendorRead(BaseModel):
 
 class VendorUpdate(BaseModel):
     name: str | None = None
+    representative_name: str | None = None
+    address: str | None = None
+    business_type: str | None = None
+    business_item: str | None = None
     vendor_category: VendorCategory | None = None
     business_number: str | None = None
     contact: str | None = None

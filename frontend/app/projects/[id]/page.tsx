@@ -19,10 +19,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  ReceiptText,
   FileText,
   Building2,
-  Printer,
   TrendingUp,
   CalendarClock,
   Sparkles,
@@ -83,7 +81,7 @@ export default function ProjectDashboardPage() {
     }
   };
 
-  const totalSpent = expenses?.reduce((sum, e) => sum + e.amount, 0) ?? 0;
+  const totalSpent = (expenses ?? []).filter((e) => e.status !== "rejected").reduce((sum, e) => sum + Number(e.amount), 0);
   const executionRate =
     project && project.total_budget > 0
       ? Math.min(100, Math.round((totalSpent / project.total_budget) * 100))
@@ -91,12 +89,13 @@ export default function ProjectDashboardPage() {
 
   const recentExpenses = (expenses ?? []).slice(0, 6);
 
-  const quickActions = [
-    { label: "비용집행 등록",  href: `/projects/${projectId}/expenses`,  icon: ReceiptText, color: "bg-blue-50 text-blue-600 hover:bg-blue-100" },
-    { label: "템플릿 관리",    href: `/projects/${projectId}/templates`,  icon: FileText,    color: "bg-purple-50 text-purple-600 hover:bg-purple-100" },
-    { label: "업체 관리",      href: `/projects/${projectId}/vendors`,    icon: Building2,   color: "bg-green-50 text-green-600 hover:bg-green-100" },
-    { label: "문서 출력",      href: `/projects/${projectId}/docs`,       icon: Printer,     color: "bg-orange-50 text-orange-600 hover:bg-orange-100" },
-  ];
+  // spent_amount는 DB에서 갱신되지 않으므로 프론트에서 expenses 합산으로 계산
+  const spentByCategory = (expenses ?? [])
+    .filter((e) => e.status !== "rejected")
+    .reduce<Record<string, number>>((acc, e) => {
+      acc[e.category_type] = (acc[e.category_type] ?? 0) + Number(e.amount ?? 0);
+      return acc;
+    }, {});
 
   const meta = project?.metadata_ ?? {};
   const hasContent = !!(meta.overview || meta.deliverables || meta.schedule);
@@ -185,22 +184,6 @@ export default function ProjectDashboardPage() {
         </Card>
       </div>
 
-      {/* Quick Actions */}
-      <Card>
-        <CardHeader className="pb-3"><CardTitle className="text-base">빠른 실행</CardTitle></CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {quickActions.map(({ label, href, icon: Icon, color }) => (
-              <Link key={href} href={href}>
-                <button className={`w-full flex flex-col items-center gap-2 p-4 rounded-lg transition-colors ${color}`}>
-                  <Icon className="w-6 h-6" />
-                  <span className="text-sm font-medium">{label}</span>
-                </button>
-              </Link>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
 
       {/* 사업계획서 주요 내용 */}
       {project && (
@@ -435,15 +418,16 @@ export default function ProjectDashboardPage() {
           <CardContent>
             <div className="space-y-2">
               {(project?.budget_categories ?? []).map((cat) => {
+                const spent = spentByCategory[cat.category_type] ?? 0;
                 const rate = cat.allocated_amount > 0
-                  ? Math.min(100, Math.round((cat.spent_amount / cat.allocated_amount) * 100))
+                  ? Math.min(100, Math.round((spent / cat.allocated_amount) * 100))
                   : 0;
                 return (
                   <div key={cat.id} className="space-y-1">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-gray-700">{CATEGORY_LABELS[cat.category_type] ?? cat.category_type}</span>
                       <span className="text-gray-500 text-xs">
-                        {formatCurrency(cat.spent_amount)} / {formatCurrency(cat.allocated_amount)} ({rate}%)
+                        {formatCurrency(spent)} / {formatCurrency(cat.allocated_amount)} ({rate}%)
                       </span>
                     </div>
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">

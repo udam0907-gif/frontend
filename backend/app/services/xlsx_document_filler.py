@@ -399,6 +399,29 @@ class XlsxDocumentFiller:
         if items_meta and context.get("line_items"):
             start_row = items_meta.get("start_row")
             columns: dict = items_meta.get("columns", {})
+
+            # ── 라인별 날짜 자동 주입 (월/일/날짜/월일 컬럼 지원) ────────
+            if start_row and columns:
+                _line_date_keys = {"month", "day", "date", "month_day"}
+                if any(k in columns for k in _line_date_keys):
+                    _raw_d = (
+                        context.get("expense_date")
+                        or context.get("issue_date")
+                        or context.get("execution_date")
+                    )
+                    _d_obj = None
+                    if _raw_d is not None:
+                        if hasattr(_raw_d, "year"):
+                            _d_obj = _raw_d
+                        else:
+                            _d_obj = _parse_date(str(_raw_d))
+                    if _d_obj:
+                        for _it in context["line_items"]:
+                            _it.setdefault("month", _d_obj.month)
+                            _it.setdefault("day", _d_obj.day)
+                            _it.setdefault("date", f"{_d_obj.month}/{_d_obj.day}")
+                            _it.setdefault("month_day", f"{_d_obj.month} {_d_obj.day}")
+
             if start_row and columns:
                 # spec 컬럼이 없거나 item_name과 같은 병합 셀을 가리키면 item_name에 합쳐서 쓴다.
                 # 예: 대신테크젠(spec=None), 민서정밀(spec=None), 선양(spec='D', item_name='C', C9:D9 병합)

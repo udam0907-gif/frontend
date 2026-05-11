@@ -63,6 +63,10 @@ class ExtractResult(TypedDict):
     vendor_name: str | None
     business_number: str | None
     contact: str | None
+    representative_name: str | None
+    address: str | None
+    business_type: str | None
+    business_item: str | None
     source: str          # 어떤 파서가 추출했는지
     confidence: dict     # per-field confidence (0~1)
 
@@ -172,29 +176,61 @@ def _extract_xlsx(data: bytes) -> tuple[str, dict]:
 # ─── 파서: PDF ──────────────────────────────────────────────────────────────
 
 def _extract_pdf(data: bytes) -> tuple[str, dict]:
+    import io as _io
+
+    # 1단계: 텍스트 기반 PDF 추출 (pdfplumber)
+    text = ""
     try:
-        import pdfplumber, io
-        with pdfplumber.open(io.BytesIO(data)) as pdf:
+        import pdfplumber
+        with pdfplumber.open(_io.BytesIO(data)) as pdf:
             pages_text = []
-            for page in pdf.pages[:5]:  # 첫 5페이지만
+            for page in pdf.pages[:5]:
                 t = page.extract_text() or ""
                 if t.strip():
                     pages_text.append(t)
-            return "\n".join(pages_text), {}
+            text = "\n".join(pages_text)
     except Exception:
         pass
-    # fallback: PyMuPDF
-    try:
-        import fitz  # PyMuPDF
-        doc = fitz.open(stream=data, filetype="pdf")
-        pages_text = []
-        for i, page in enumerate(doc):
-            if i >= 5:
-                break
-            pages_text.append(page.get_text())
-        return "\n".join(pages_text), {}
-    except Exception:
-        return "", {}
+
+    # 2단계: PyMuPDF 텍스트 추출 (fallback)
+    if not text.strip():
+        try:
+            import fitz
+            doc = fitz.open(stream=data, filetype="pdf")
+            pages_text = []
+            for i, page in enumerate(doc):
+                if i >= 5:
+                    break
+                t = page.get_text()
+                if t.strip():
+                    pages_text.append(t)
+            text = "\n".join(pages_text)
+        except Exception:
+            pass
+
+    # 3단계: 스캔 PDF OCR — 텍스트가 없으면 페이지를 이미지로 변환 후 테서랙트
+    if not text.strip():
+        try:
+            import fitz
+            import pytesseract
+            from PIL import Image
+            doc = fitz.open(stream=data, filetype="pdf")
+            ocr_texts = []
+            for i, page in enumerate(doc):
+                if i >= 5:
+                    break
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2× 확대 → OCR 정확도 향상
+                img = Image.open(_io.BytesIO(pix.tobytes("png")))
+                ocr_text = pytesseract.image_to_string(img, lang="kor+eng")
+                if ocr_text.strip():
+                    ocr_texts.append(ocr_text)
+            text = "\n".join(ocr_texts)
+            if text.strip():
+                logger.info("pdf_ocr_used", pages=len(ocr_texts))
+        except Exception as e:
+            logger.warning("pdf_ocr_failed", error=str(e))
+
+    return text, {}
 
 
 # ─── 파서: 이미지 (JPG / PNG) ────────────────────────────────────────────────
@@ -239,6 +275,32 @@ def extract_vendor_info(filename: str, data: bytes) -> ExtractResult:
     fields = _extract_from_text(text)
     confidence = fields.pop("_confidence", {})
 
+    # 사업자등록증용 4필드 추가 추출 — company_setting_extractor 로직 재사용
+    representative_name: str | None = None
+    address: str | None = None
+    business_type: str | None = None
+    business_item: str | None = None
+
+    if text.strip():
+        try:
+            from app.services.company_setting_extractor import (
+                _extract_company_fields,
+                _is_plausible_value,
+            )
+            biz_fields = _extract_company_fields(text, "business_registration")
+            representative_name = biz_fields.get("representative_name")
+            address = biz_fields.get("address")
+            business_type = biz_fields.get("business_type")
+            business_item = biz_fields.get("business_item")
+            # company_name이 vendor_name보다 정확한 경우 우선 적용
+            if not fields.get("vendor_name") and biz_fields.get("company_name"):
+                fields["vendor_name"] = biz_fields["company_name"]
+            # business_registration_number → business_number fallback
+            if not fields.get("business_number") and biz_fields.get("company_registration_number"):
+                fields["business_number"] = biz_fields["company_registration_number"]
+        except Exception as _e:
+            logger.warning("vendor_biz_fields_extract_failed", error=str(_e))
+
     logger.info(
         "vendor_info_extracted",
         parser=parser_name,
@@ -250,6 +312,10 @@ def extract_vendor_info(filename: str, data: bytes) -> ExtractResult:
         vendor_name=fields.get("vendor_name"),
         business_number=fields.get("business_number"),
         contact=fields.get("contact"),
+        representative_name=representative_name,
+        address=address,
+        business_type=business_type,
+        business_item=business_item,
         source=parser_name,
         confidence=confidence,
     )

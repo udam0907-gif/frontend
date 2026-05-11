@@ -311,6 +311,10 @@ export interface Vendor {
   id: string;
   project_id: string;
   name: string;
+  representative_name?: string | null;
+  address?: string | null;
+  business_type?: string | null;
+  business_item?: string | null;
   vendor_category: VendorCategory;
   business_number: string;
   contact: string | null;
@@ -326,6 +330,10 @@ export interface Vendor {
 export interface VendorCreate {
   project_id: string;
   name: string;
+  representative_name?: string | null;
+  address?: string | null;
+  business_type?: string | null;
+  business_item?: string | null;
   vendor_category: VendorCategory;
   business_number: string;
   contact?: string;
@@ -471,7 +479,8 @@ export type CompanySettingsUploadType =
   | "bank_copy"
   | "quote_template"
   | "transaction_statement_template"
-  | "seal_image";
+  | "seal_image"
+  | "signature_image";
 
 export interface CompanySettingsFileStatus {
   path: string | null;
@@ -493,6 +502,7 @@ export interface CompanySettings {
   fax: string | null;
   email: string | null;
   seal_image_path: string | null;
+  signature_image_path: string | null;
   company_business_registration_path: string | null;
   company_bank_copy_path: string | null;
   company_quote_template_path: string | null;

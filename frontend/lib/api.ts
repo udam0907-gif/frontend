@@ -8,6 +8,7 @@ import type {
   Template,
   ExpenseItem,
   ExpenseCreate,
+  ExpenseStatus,
   ValidationResult,
   RcmsManual,
   RcmsQaResponse,
@@ -163,7 +164,7 @@ export const expensesApi = {
   create: (data: ExpenseCreate) =>
     apiClient.post<ExpenseItem>("/expenses", data).then((r) => r.data),
 
-  update: (id: string, data: Partial<ExpenseCreate>) =>
+  update: (id: string, data: Partial<ExpenseCreate> & { status?: ExpenseStatus }) =>
     apiClient.patch<ExpenseItem>(`/expenses/${id}`, data).then((r) => r.data),
 
   delete: (id: string) =>
@@ -266,6 +267,10 @@ export interface VendorExtractResult {
   vendor_name: string | null;
   business_number: string | null;
   contact: string | null;
+  representative_name?: string | null;
+  address?: string | null;
+  business_type?: string | null;
+  business_item?: string | null;
   source: string;
   confidence: Record<string, number>;
 }

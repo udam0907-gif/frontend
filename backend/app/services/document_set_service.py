@@ -191,6 +191,8 @@ class DocumentSetResult:
 
 
 class DocumentSetService:
+    _GLOBAL_DOC_TYPES = {DocumentType.expense_resolution}  # 비목 무시하고 매칭
+
     def __init__(self, storage_path: str) -> None:
         self._vendor_copies_path = Path(storage_path) / "vendor_copies"
         self._vendor_copies_path.mkdir(parents=True, exist_ok=True)
@@ -322,11 +324,20 @@ class DocumentSetService:
                 error_message=f"내부 템플릿 미등록: {doc_type.value}",
             )
 
+        # vendor 대표자 정보 보강 (검수확인서 등 내부 양식에서 vendor_representative 사용)
+        internal_ctx = dict(base_context)
+        if vendor is not None:
+            internal_ctx.setdefault(
+                "vendor_representative",
+                vendor.representative_name or "",
+            )
+            internal_ctx.setdefault("vendor_name", vendor.name or "")
+
         return await self._render_from_template(
             doc_type=doc_type,
             template_path=template.file_path,
             field_map=template.field_map,
-            context=base_context,
+            context=internal_ctx,
             project_data=project_data,
             expense=expense,
             template_id=str(template.id),
@@ -807,6 +818,10 @@ class DocumentSetService:
             ctx.setdefault("company_bank_copy_path", company_setting.company_bank_copy_path or "")
             ctx.setdefault("company_quote_template_path", company_setting.company_quote_template_path or "")
             ctx.setdefault("company_transaction_statement_template_path", company_setting.company_transaction_statement_template_path or "")
+            # 도장 이미지 (지출결의서·검수확인서 docxtpl용)
+            ctx.setdefault("ourcompany_seal_image", company_setting.seal_image_path or "")
+            # 서명 이미지 (지출결의서 서명란 docxtpl용)
+            ctx.setdefault("ourcompany_signature_image", company_setting.signature_image_path or "")
         inspection_images = sorted(
             [
                 doc for doc in (expense.documents or [])
@@ -816,6 +831,15 @@ class DocumentSetService:
         )
         if inspection_images:
             ctx["inspection_image_path"] = inspection_images[-1].file_path
+            # 검수확인서 docxtpl용 image_1 / image_2 (최신 2장)
+            ctx.setdefault("image_1", inspection_images[-1].file_path)
+            if len(inspection_images) >= 2:
+                ctx.setdefault("image_2", inspection_images[-2].file_path)
+            else:
+                ctx.setdefault("image_2", "")
+        else:
+            ctx.setdefault("image_1", "")
+            ctx.setdefault("image_2", "")
         ctx.setdefault("recipient_display_name", f"{vendor_name} 귀하" if vendor_name else "")
 
         # vendor 정보가 context에 없으면 expense의 vendor_name으로 보완
@@ -837,6 +861,127 @@ class DocumentSetService:
 
         # 받는자 회사명 + 「귀하」 결합 (한 셀짜리 양식 — 동우/케이테크/신라정밀 등)
         synthesize_recipient_with_honorific(ctx)
+
+        # ───────────────────────────────────────────────────────────────
+        # Phase 2-2: 미주입 placeholder alias 흡수 (2026-05-11)
+        # 진단으로 확인된 변수명 불일치 8건 + 단가 콤마 표기
+        # ───────────────────────────────────────────────────────────────
+
+        # A) 비목 체크박스 — category_type 직접 매핑
+        # (budget_item_* 는 generator가 _build_context 이후에 주입하므로 여기서 읽을 수 없음)
+        _CATEGORY_TO_BOX: dict[str, str] = {
+            "materials":   "box_materials",
+            "labor":       "box_personnel",
+            "outsourcing": "box_activity",
+            "meeting":     "box_activity",
+            "test_report": "box_activity",
+            "other":       "box_indirect",
+        }
+        _category_val = str(ctx.get("category_type", ""))
+        _checked_box = _CATEGORY_TO_BOX.get(_category_val, "")
+        for _bk in ("box_materials", "box_personnel", "box_activity", "box_indirect", "box_research"):
+            ctx[_bk] = "■" if _bk == _checked_box else "□"
+
+        # B) 회사 대표/도장 alias (our_company_xxx ↔ ourcompany_xxx)
+        _COMPANY_ALIAS = {
+            "ourcompany_representative": "our_company_representative",
+            "ourcompany_name":           "our_company_name",
+            "ourcompany_address":        "our_company_address",
+            "ourcompany_phone":          "our_company_phone",
+            "ourcompany_email":          "our_company_email",
+            "ourcompany_seal_image":      "our_company_seal_image",
+            "ourcompany_signature_image": "our_company_signature_image",
+        }
+        for _alias, _src in _COMPANY_ALIAS.items():
+            if not ctx.get(_alias) and ctx.get(_src):
+                ctx[_alias] = ctx[_src]
+
+        # C) issue_date 분리 (year/month/day)
+        from datetime import date as _date_cls, datetime as _dt_cls
+        if not ctx.get("issue_date_year"):
+            _id_raw = ctx.get("issue_date") or ctx.get("expense_date")
+            _id_obj = None
+            if _id_raw:
+                if isinstance(_id_raw, (_date_cls, _dt_cls)):
+                    _id_obj = _id_raw
+                elif isinstance(_id_raw, str):
+                    try:
+                        _id_obj = _dt_cls.strptime(_id_raw[:10], "%Y-%m-%d").date()
+                    except Exception:
+                        _id_obj = None
+            if _id_obj:
+                ctx["issue_date_year"]  = _id_obj.year
+                ctx["issue_date_month"] = _id_obj.month
+                ctx["issue_date_day"]   = _id_obj.day
+
+        # D) project_period_start/end
+        if not ctx.get("project_period_start") and getattr(project, "period_start", None):
+            ctx["project_period_start"] = str(project.period_start)
+        if not ctx.get("project_period_end") and getattr(project, "period_end", None):
+            ctx["project_period_end"] = str(project.period_end)
+
+        # E) purpose fallback
+        if not ctx.get("purpose"):
+            ctx["purpose"] = (
+                ctx.get("purchase_purpose")
+                or ctx.get("contract_name")
+                or (expense.title if hasattr(expense, "title") else "")
+                or ""
+            )
+
+        # F) 금액 콤마 포매팅
+        def _fmt_comma(v):
+            try:
+                if v in (None, ""):
+                    return ""
+                return f"{int(float(v)):,}"
+            except Exception:
+                return str(v) if v is not None else ""
+
+        if isinstance(ctx.get("line_items"), list):
+            for _it in ctx["line_items"]:
+                if not isinstance(_it, dict):
+                    continue
+                for _k in ("unit_price", "amount", "total_amount",
+                           "supply_amount", "tax_amount", "quantity"):
+                    if _k in _it and _it[_k] not in (None, ""):
+                        _it.setdefault(f"{_k}_comma", _fmt_comma(_it[_k]))
+
+        for _k in ("purchase_amount", "total_amount", "amount",
+                   "supply_amount", "tax_amount", "unit_price"):
+            _v = ctx.get(_k)
+            if _v not in (None, ""):
+                ctx.setdefault(f"{_k}_comma", _fmt_comma(_v))
+
+        # F-2) 검수확인서 등 내부 양식 변수 fallback
+        ctx.setdefault("vendor_representative", "")  # _process_doc ④에서 vendor 접근 후 덮어씀
+        ctx.setdefault(
+            "delivery_date",
+            str(expense.expense_date) if getattr(expense, "expense_date", None) else "",
+        )
+        ctx.setdefault("contract_name", getattr(expense, "title", "") or "")
+        ctx.setdefault("purchase_amount", int(getattr(expense, "amount", 0) or 0))
+
+        # 검수확인서 검수자 칸 — 서명 이미지 alias
+        if company_setting and getattr(company_setting, "signature_image_path", None):
+            ctx.setdefault("inspector_signature_image", company_setting.signature_image_path)
+        else:
+            ctx.setdefault("inspector_signature_image", "")
+
+        # G) 마지막 (인) 박스 도장 — 변수명 후보 모두 seal_image_path로 alias
+        _SEAL_VARIANTS = (
+            "seal_image", "signature_image", "ourcompany_seal",
+            "company_seal", "stamp_image", "seal_image_2",
+            "representative_seal", "approver_seal",
+        )
+        _seal_src = (
+            ctx.get("ourcompany_seal_image")
+            or ctx.get("our_company_seal_image")
+            or (company_setting.seal_image_path if company_setting else None)
+        )
+        if _seal_src:
+            for _sv in _SEAL_VARIANTS:
+                ctx.setdefault(_sv, _seal_src)
 
         return ctx
 
@@ -964,27 +1109,34 @@ class DocumentSetService:
         project_id: uuid.UUID,
         db: AsyncSession,
     ) -> Template | None:
-        """과제 전용 → 공용 순으로 템플릿 탐색."""
-        result = await db.execute(
-            select(Template).where(
-                Template.category_type == category_type,
-                Template.document_type == document_type,
-                Template.project_id == project_id,
-                Template.is_active == True,
-            ).order_by(Template.created_at.desc()).limit(1)
+        """과제 전용 → 공용 순으로 템플릿 탐색.
+        DocumentType이 _GLOBAL_DOC_TYPES에 있으면 비목 매칭 생략 (전사 공통).
+        """
+        is_global = document_type in self._GLOBAL_DOC_TYPES
+
+        # 과제 전용 우선
+        stmt = select(Template).where(
+            Template.document_type == document_type,
+            Template.project_id == project_id,
+            Template.is_active == True,
         )
-        template = result.scalar_one_or_none()
+        if not is_global:
+            stmt = stmt.where(Template.category_type == category_type)
+        stmt = stmt.order_by(Template.created_at.desc()).limit(1)
+        template = (await db.execute(stmt)).scalar_one_or_none()
         if template:
             return template
-        result = await db.execute(
-            select(Template).where(
-                Template.category_type == category_type,
-                Template.document_type == document_type,
-                Template.project_id == None,
-                Template.is_active == True,
-            ).order_by(Template.created_at.desc()).limit(1)
+
+        # 공용
+        stmt = select(Template).where(
+            Template.document_type == document_type,
+            Template.project_id == None,
+            Template.is_active == True,
         )
-        return result.scalar_one_or_none()
+        if not is_global:
+            stmt = stmt.where(Template.category_type == category_type)
+        stmt = stmt.order_by(Template.created_at.desc()).limit(1)
+        return (await db.execute(stmt)).scalar_one_or_none()
 
     async def _get_cell_map_from_pool(
         self,

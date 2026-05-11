@@ -213,6 +213,19 @@ class DocumentGenerator:
             if ps and pe:
                 ctx["project_period"] = f"{ps} ~ {pe}"
 
+        # 3-c) issue_date_year/month/day 자동 파생
+        if not ctx.get("issue_date_year"):
+            _raw = ctx.get("issue_date") or ctx.get("expense_date") or ctx.get("execution_date") or ""
+            if _raw:
+                try:
+                    from datetime import datetime as _dt
+                    _d = _dt.strptime(str(_raw)[:10], "%Y-%m-%d")
+                    ctx.setdefault("issue_date_year", str(_d.year))
+                    ctx.setdefault("issue_date_month", str(_d.month))
+                    ctx.setdefault("issue_date_day", str(_d.day))
+                except Exception:
+                    pass
+
         if document_type in {"quote", "comparative_quote", "transaction_statement"}:
             if document_type == "comparative_quote":
                 recipient_name = str(
@@ -326,6 +339,10 @@ class DocumentGenerator:
                 max_rows=li_spec.max_rows,
             )
             rows = rows[: li_spec.max_rows]
+
+        # 인덱스 직접 접근 템플릿(line_items[2].item_name 등)을 위해 max_rows까지 빈 행 패딩
+        while len(rows) < li_spec.max_rows:
+            rows.append({})
 
         # docxtpl은 빈 셀도 렌더링하므로 누락 키를 빈 문자열로 채움
         # seq는 스키마 컬럼 여부와 무관하게 항상 주입 (NO. 열용)
@@ -1092,15 +1109,188 @@ class DocumentGenerator:
 
     def _render_docx(self, template_path: str, context: dict[str, Any], expense_item_id: str) -> str:
         try:
+            from docxtpl import InlineImage
+            from docx.shared import Cm, Mm
             tpl = DocxTemplate(template_path)
             safe_context = self._sanitize_context(context)
+            # 숫자 필드 콤마 포매팅 (DOCX 전용 — XLSX 렌더러는 별도 처리)
+            _COMMA_KEYS = (
+                "unit_price", "amount", "total_amount", "purchase_amount",
+                "subtotal", "vat", "supply_amount", "tax_amount",
+            )
+            for _ck in _COMMA_KEYS:
+                _cv = safe_context.get(_ck)
+                if isinstance(_cv, (int, float)):
+                    safe_context[_ck] = f"{int(_cv):,}"
+            if isinstance(safe_context.get("line_items"), list):
+                for _li in safe_context["line_items"]:
+                    if isinstance(_li, dict):
+                        for _ck in ("unit_price", "amount"):
+                            _cv = _li.get(_ck)
+                            if isinstance(_cv, (int, float)):
+                                _li[_ck] = f"{int(_cv):,}"
+            # 이미지 경로 → InlineImage 변환 (도장, 검수 사진)
+            _IMAGE_KEYS = (
+                "ourcompany_seal_image", "our_company_seal_image",
+                "ourcompany_signature_image", "our_company_signature_image",
+                "inspector_signature_image",
+                "image_1", "image_2", "image_3", "inspection_image_path",
+                "seal_image", "signature_image", "ourcompany_seal",
+                "company_seal", "stamp_image", "seal_image_2",
+                "representative_seal", "approver_seal",
+            )
+            _SEAL_KEYS = {"ourcompany_seal_image", "our_company_seal_image", "seal_image",
+                          "ourcompany_seal", "company_seal", "stamp_image", "seal_image_2",
+                          "representative_seal", "approver_seal"}
+            _SIGNATURE_KEYS = {"ourcompany_signature_image", "our_company_signature_image",
+                               "signature_image", "inspector_signature_image"}
+            _PHOTO_KEYS = {"image_1", "image_2", "image_3", "inspection_image_path"}
+            for _key in _IMAGE_KEYS:
+                _path = str(safe_context.get(_key) or "")
+                if _path and Path(_path).exists():
+                    if _key in _SEAL_KEYS:
+                        _width = Mm(20)      # 도장: 20mm
+                    elif _key in _SIGNATURE_KEYS:
+                        _width = Mm(30)      # 서명: 30mm
+                    elif _key in _PHOTO_KEYS:
+                        _width = Mm(120)     # 검수 사진: 120mm (셀 가득)
+                    else:
+                        _width = Mm(80)
+                    safe_context[_key] = InlineImage(tpl, _path, width=_width)
+                else:
+                    safe_context[_key] = ""
             tpl.render(safe_context)
             output_filename = f"{expense_item_id}_{uuid.uuid4().hex[:8]}.docx"
             output_path = str(self._output_base / output_filename)
             tpl.save(output_path)
+            # 지출결의서 전용 후처리
+            if safe_context.get("box_materials") is not None:
+                seal_src = str(context.get("ourcompany_seal_image") or "")
+                rep_name = str(
+                    context.get("ourcompany_representative")
+                    or context.get("our_company_representative")
+                    or ""
+                )
+                co_name = str(
+                    context.get("ourcompany_name")
+                    or context.get("our_company_name")
+                    or ""
+                )
+                self._post_process_expense_resolution(output_path, seal_src, rep_name, co_name)
             return output_path
         except Exception as e:
             raise DocumentGenerationError(f"DOCX 렌더링 실패: {e}") from e
+
+    def _post_process_expense_resolution(
+        self,
+        docx_path: str,
+        seal_path: str,
+        representative_name: str = "",
+        company_name: str = "",
+    ) -> None:
+        """지출결의서 후처리 (견본 기준):
+        A) 자동합계 제거  B) 세목 열 너비  C) 상단 작성/검토 서명 제거
+        D) 바닥 텍스트박스 대표이사 한 줄  E) 문장 오류 수정  F) 회사명 추가
+        """
+        import re as _re
+        from docx import Document as _Doc
+        from lxml import etree as _etree
+
+        _W_NS   = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        _WPS_NS = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+
+        try:
+            doc = _Doc(docx_path)
+
+            # ── A) tbl3[r6][c6] 자동합계 텍스트 제거 ─────────────────────────
+            try:
+                for run in doc.tables[3].rows[6].cells[6].paragraphs[0].runs:
+                    run.text = ""
+            except (IndexError, Exception):
+                pass
+
+            # ── B) tbl2 세목 열 너비 재분배 ───────────────────────────────────
+            _NEW_W = {1: 1950, 2: 1350, 3: 1622, 4: 1350, 5: 1900}
+            try:
+                for row in doc.tables[2].rows:
+                    for ci, new_w in _NEW_W.items():
+                        if ci < len(row.cells):
+                            tcPr = row.cells[ci]._element.find(f"{{{_W_NS}}}tcPr")
+                            if tcPr is not None:
+                                tcW = tcPr.find(f"{{{_W_NS}}}tcW")
+                                if tcW is not None:
+                                    tcW.set(f"{{{_W_NS}}}w", str(new_w))
+            except (IndexError, Exception):
+                pass
+
+            # ── C) 상단 tbl0[r1] — 작성(c1)·검토(c2) 서명 이미지 제거 ─────────
+            # 견본: 과제책임자(c3)만 서명, 나머지 빈칸
+            try:
+                for ci in [1, 2]:
+                    cell = doc.tables[0].rows[1].cells[ci]
+                    for drawing in list(cell._element.iter(f"{{{_W_NS}}}drawing")):
+                        drawing.getparent().remove(drawing)
+            except (IndexError, Exception):
+                pass
+
+            # ── D) 바닥 텍스트박스 — "대표이사 …… [대표명]" 기존 단락 앞에 삽입 ─
+            # 새 단락이 아닌 기존 (인) 단락에 run을 prepend → 한 줄로 유지
+            if representative_name:
+                try:
+                    for txbx in doc.element.body.iter(f"{{{_WPS_NS}}}txbx"):
+                        content = txbx.find(f"{{{_W_NS}}}txbxContent")
+                        if content is None:
+                            continue
+                        # 텍스트가 있는 단락을 찾음 (첫 번째 단락이 빈 경우 대비)
+                        target_p = None
+                        for p in content.findall(f"{{{_W_NS}}}p"):
+                            raw = "".join(
+                                t.text or "" for t in p.iter(f"{{{_W_NS}}}t")
+                            )
+                            if raw.strip():
+                                target_p = p
+                                break
+                        if target_p is None:
+                            continue
+                        # pPr 다음 위치에 새 run 삽입 (pPr이 없으면 맨 앞)
+                        pPr = target_p.find(f"{{{_W_NS}}}pPr")
+                        idx = (list(target_p).index(pPr) + 1) if pPr is not None else 0
+                        new_r = _etree.Element(f"{{{_W_NS}}}r")
+                        new_t = _etree.SubElement(new_r, f"{{{_W_NS}}}t")
+                        new_t.text = f"대표이사 ……  {representative_name}  "
+                        new_t.set(
+                            "{http://www.w3.org/XML/1998/namespace}space", "preserve"
+                        )
+                        target_p.insert(idx, new_r)
+                        break
+                except Exception:
+                    pass
+
+            # ── E) 문장 오류 수정 "합니다고" → "하오니" ──────────────────────
+            try:
+                for para in doc.paragraphs:
+                    for run in para.runs:
+                        if run.text and "합니다고" in run.text:
+                            run.text = run.text.replace("합니다고", "하오니")
+                        if run.text and "결재 바랍니다" in run.text:
+                            run.text = run.text.replace("결재 바랍니다", "결재바랍니다")
+            except Exception:
+                pass
+
+            # ── F) 바닥 날짜 단락에 회사명 추가 (견본: "2025년 02월 11일  유담") ─
+            if company_name:
+                try:
+                    for para in doc.paragraphs:
+                        if _re.search(r"\d{4}년\s+\d{1,2}월\s+\d{1,2}일", para.text):
+                            if company_name not in para.text:
+                                para.add_run(f"     {company_name}")
+                            break
+                except Exception:
+                    pass
+
+            doc.save(docx_path)
+        except Exception:
+            pass
 
     # ─── XLSX cell_map 렌더러 (vendor_pool 자동 분석 결과 기반) ──────────────
 

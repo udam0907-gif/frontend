@@ -172,6 +172,12 @@ export default function ProjectDocsPage() {
               : `문서세트 생성이 완료되었습니다. 총 ${data.generated}건 생성됨`,
         },
       }));
+      // 문서 생성 완료 → 비용 상태를 exported로 갱신 → 대시보드 집행액 반영
+      if (data.generated > 0) {
+        expensesApi.update(expenseId, { status: "exported" }).then(() => {
+          queryClient.invalidateQueries({ queryKey: ["expenses", id] });
+        });
+      }
     },
     onError: (error, expenseId) => {
       const message =

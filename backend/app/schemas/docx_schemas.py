@@ -250,9 +250,17 @@ DOCX_FIELD_ALIASES: dict[str, dict[str, str]] = {
         "expense_date":                "inspection_date",
         "title":                       "contract_name",
         "institution":                 "buyer_name",
+        "our_company_name":            "ourcompany_name",
+        "our_company_representative":  "ourcompany_representative",
+        "total_amount":                "purchase_amount",
     },
     "expense_resolution": {
         "expense_date":                "execution_date",
+        "our_company_representative":  "ourcompany_representative",
+        "our_company_name":            "ourcompany_name",
+        "period_start":                "project_period_start",
+        "period_end":                  "project_period_end",
+        "purchase_purpose":            "purpose",
     },
 }
 

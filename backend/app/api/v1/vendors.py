@@ -38,11 +38,15 @@ def _generate_safe_filename(filename: str) -> str:
 
 
 class VendorExtractResponse(BaseModel):
-    vendor_name: str | None
-    business_number: str | None
-    contact: str | None
-    source: str
-    confidence: dict
+    vendor_name: str | None = None
+    business_number: str | None = None
+    contact: str | None = None
+    representative_name: str | None = None
+    address: str | None = None
+    business_type: str | None = None
+    business_item: str | None = None
+    source: str = ""
+    confidence: dict = {}
 
 
 @router.post("/extract", response_model=VendorExtractResponse)
@@ -51,7 +55,7 @@ async def extract_vendor_info_from_file(
 ) -> VendorExtractResponse:
     """
     업로드한 파일(견적서, 거래명세서, 사업자등록증, 통장사본)에서
-    업체명 / 사업자번호 / 연락처를 자동 추출한다.
+    업체 기본정보(업체명/사업자번호/연락처/대표자명/주소/업태/종목)를 자동 추출한다.
     """
     _ALLOWED = {".docx", ".xlsx", ".pdf", ".jpg", ".jpeg", ".png"}
     original_filename = file.filename or "file"
@@ -69,6 +73,10 @@ async def extract_vendor_info_from_file(
         vendor_name=result["vendor_name"],
         business_number=result["business_number"],
         contact=result["contact"],
+        representative_name=result.get("representative_name"),
+        address=result.get("address"),
+        business_type=result.get("business_type"),
+        business_item=result.get("business_item"),
         source=result["source"],
         confidence=result["confidence"],
     )

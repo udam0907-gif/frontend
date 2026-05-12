@@ -30,6 +30,7 @@ class CompanySetting(Base, TimestampMixin):
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     default_manager_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     seal_image_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    signature_image_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     company_business_registration_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     company_bank_copy_path: Mapped[str | None] = mapped_column(Text, nullable=True)

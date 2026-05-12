@@ -45,6 +45,8 @@ interface EditForm {
   compareVendorId: string;
   expenseDate: string;
   note: string;
+  usagePurpose: string;
+  purchasePurpose: string;
 }
 
 // 비교견적이 필요한 비목
@@ -70,7 +72,6 @@ interface BaseForm {
   note: string;
   usagePurpose: string;
   purchasePurpose: string;
-  deliveryDate: string;
 }
 
 interface MeetingFields {
@@ -122,7 +123,6 @@ const initialBase: BaseForm = {
   note: "",
   usagePurpose: "",
   purchasePurpose: "",
-  deliveryDate: "",
 };
 
 const createInitialMaterials = (): MaterialsFields => ({
@@ -156,6 +156,7 @@ export default function ProjectExpensesPage() {
   const [editForm, setEditForm] = useState<EditForm>({
     title: "", amount: "", quantity: "", unitPrice: "",
     vendorId: "", vendorName: "", compareVendorId: "", expenseDate: "", note: "",
+    usagePurpose: "", purchasePurpose: "",
   });
   const [inspectionDragId, setInspectionDragId] = useState<string | null>(null);
   const [inspectionUploadingId, setInspectionUploadingId] = useState<string | null>(null);
@@ -214,7 +215,6 @@ export default function ProjectExpensesPage() {
     }
     if (base.usagePurpose) common["usage_purpose"] = base.usagePurpose;
     if (base.purchasePurpose) common["purchase_purpose"] = base.purchasePurpose;
-    if (base.deliveryDate) common["delivery_date"] = base.deliveryDate;
 
     switch (base.categoryType) {
       case "meeting":
@@ -305,6 +305,8 @@ export default function ProjectExpensesPage() {
       compareVendorId: (meta.compare_vendor_id as string) ?? "",
       expenseDate: expense.expense_date ?? "",
       note: expense.description ?? "",
+      usagePurpose: (meta.usage_purpose as string) ?? "",
+      purchasePurpose: (meta.purchase_purpose as string) ?? "",
     });
   };
 
@@ -331,6 +333,8 @@ export default function ProjectExpensesPage() {
       ...(isMaterials
         ? { quantity: Number(editForm.quantity), unit_price: Number(editForm.unitPrice) }
         : {}),
+      usage_purpose: editForm.usagePurpose || undefined,
+      purchase_purpose: editForm.purchasePurpose || undefined,
     };
     // undefined 키 제거
     Object.keys(newMeta).forEach(k => newMeta[k] === undefined && delete newMeta[k]);
@@ -412,7 +416,7 @@ export default function ProjectExpensesPage() {
 
   const handleSubmit = () => {
     if (!base.budgetItem.trim()) {
-      setMessage({ type: "error", text: "예산항목을 입력하세요." });
+      setMessage({ type: "error", text: "검수확인서 계약명을 입력하세요." });
       return;
     }
     const amount =
@@ -618,10 +622,10 @@ export default function ProjectExpensesPage() {
               )}
 
               <div className="space-y-1.5">
-                <Label htmlFor="budgetItem">예산항목 *</Label>
+                <Label htmlFor="budgetItem">검수확인서 계약명 *</Label>
                 <Input
                   id="budgetItem"
-                  placeholder="예: AI 칩 구매"
+                  placeholder="예: 검수확인서 계약명"
                   value={base.budgetItem}
                   onChange={(e) => setBase((f) => ({ ...f, budgetItem: e.target.value }))}
                 />
@@ -652,7 +656,7 @@ export default function ProjectExpensesPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label>용 도</Label>
+                <Label>지출결의서 용도</Label>
                 <Textarea
                   id="usagePurpose"
                   rows={2}
@@ -662,7 +666,7 @@ export default function ProjectExpensesPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="purchasePurpose">구매 목적</Label>
+                <Label htmlFor="purchasePurpose">지출결의서 구매목적</Label>
                 <Textarea
                   id="purchasePurpose"
                   rows={2}
@@ -671,15 +675,6 @@ export default function ProjectExpensesPage() {
                 />
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="deliveryDate">납품일</Label>
-                <Input
-                  id="deliveryDate"
-                  type="date"
-                  value={base.deliveryDate}
-                  onChange={(e) => setBase((f) => ({ ...f, deliveryDate: e.target.value }))}
-                />
-              </div>
             </div>
           </div>
 
@@ -800,11 +795,18 @@ export default function ProjectExpensesPage() {
                   )}
                 </div>
 
-                {/* 저장 직후 해당 건 검수 이미지 업로드 — 검수확인서에 자동 삽입됨 */}
+                {/* 저장 직후 해당 건 검수 이미지 업로드 — 검수확인서에 자동 삽입됨 (최대 2장) */}
                 {lastCreatedExpenseId && (() => {
                   const savedExpense = (expenses ?? []).find(e => e.id === lastCreatedExpenseId);
                   if (!savedExpense) return null;
-                  const inspImage = savedExpense.documents?.find(doc => doc.document_type === "inspection_photos");
+                  const inspImagesAll = (savedExpense.documents ?? [])
+                    .filter(doc => doc.document_type === "inspection_photos")
+                    .slice()
+                    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                  const slots: Array<typeof inspImagesAll[number] | null> = [
+                    inspImagesAll[0] ?? null,
+                    inspImagesAll[1] ?? null,
+                  ];
                   const inspMsg = inspectionMessages[lastCreatedExpenseId];
                   const isBusy = inspectionUploadingId === lastCreatedExpenseId;
                   const isDrag = inspectionDragId === lastCreatedExpenseId;
@@ -812,69 +814,86 @@ export default function ProjectExpensesPage() {
                     <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 space-y-3">
                       <div>
                         <p className="text-sm font-semibold text-gray-900">
-                          재료비 검수 이미지 업로드
+                          재료비 검수 이미지 업로드 (최대 2장)
                         </p>
                         <p className="text-xs text-gray-500 mt-0.5">
-                          업로드한 이미지는 <span className="font-medium text-amber-700">검수확인서</span>에 자동 삽입됩니다.
+                          업로드한 이미지는 <span className="font-medium text-amber-700">검수확인서</span>의 image_1 / image_2 자리에 자동 삽입됩니다.
                           대상: <span className="font-medium">{savedExpense.title}</span>
                         </p>
                       </div>
-                      <div
-                        className={`rounded-lg border-2 border-dashed px-4 py-4 text-sm transition ${
-                          isDrag ? "border-amber-500 bg-amber-50" : "border-gray-200 bg-white"
-                        }`}
-                        onDragOver={(e) => { e.preventDefault(); setInspectionDragId(lastCreatedExpenseId); }}
-                        onDragLeave={() => setInspectionDragId(null)}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          void handleInspectionImageUpload(lastCreatedExpenseId, e.dataTransfer.files?.[0]);
-                        }}
-                      >
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="font-medium text-gray-800">
-                              파일을 드래그하거나 선택해서 업로드하세요
+                      {inspMsg && (
+                        <p className={`text-xs ${
+                          inspMsg.type === "error" ? "text-red-600"
+                          : inspMsg.type === "success" ? "text-green-700"
+                          : "text-blue-600"
+                        }`}>
+                          {inspMsg.text}
+                        </p>
+                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {slots.map((img, idx) => (
+                          <div
+                            key={idx}
+                            className={`rounded-lg border-2 border-dashed px-3 py-3 text-sm transition ${
+                              isDrag ? "border-amber-500 bg-amber-50" : "border-gray-200 bg-white"
+                            }`}
+                            onDragOver={(e) => { e.preventDefault(); setInspectionDragId(lastCreatedExpenseId); }}
+                            onDragLeave={() => setInspectionDragId(null)}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              const file = e.dataTransfer.files?.[0];
+                              if (!file) return;
+                              if (img) {
+                                void expensesApi.deleteDocument(lastCreatedExpenseId, img.id).then(() =>
+                                  handleInspectionImageUpload(lastCreatedExpenseId, file)
+                                );
+                              } else {
+                                void handleInspectionImageUpload(lastCreatedExpenseId, file);
+                              }
+                            }}
+                          >
+                            <p className="text-xs font-semibold text-gray-700 mb-1">
+                              검수 이미지 {idx + 1} ({idx === 0 ? "image_1" : "image_2"})
                             </p>
-                            <p className="mt-1 text-xs text-gray-500">
-                              현재 파일: {inspImage?.filename ?? "등록된 검수 이미지 없음"}
+                            <p className="text-xs text-gray-500 mb-2 truncate">
+                              {img?.filename ?? "비어 있음 — 드래그 또는 파일 선택"}
                             </p>
-                            {inspMsg && (
-                              <p className={`mt-1 text-xs ${
-                                inspMsg.type === "error" ? "text-red-600"
-                                : inspMsg.type === "success" ? "text-green-700"
-                                : "text-blue-600"
-                              }`}>
-                                {inspMsg.text}
-                              </p>
-                            )}
+                            <div className="flex items-center gap-2">
+                              <label className="inline-flex cursor-pointer items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                                {isBusy ? "처리 중..." : img ? "교체" : "파일 선택"}
+                                <input
+                                  type="file"
+                                  accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                                  className="hidden"
+                                  disabled={isBusy}
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    e.currentTarget.value = "";
+                                    if (!file) return;
+                                    if (img) {
+                                      void expensesApi.deleteDocument(lastCreatedExpenseId, img.id).then(() =>
+                                        handleInspectionImageUpload(lastCreatedExpenseId, file)
+                                      );
+                                    } else {
+                                      void handleInspectionImageUpload(lastCreatedExpenseId, file);
+                                    }
+                                  }}
+                                />
+                              </label>
+                              {img && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={isBusy}
+                                  onClick={() => handleInspectionImageDelete(lastCreatedExpenseId, img.id)}
+                                >
+                                  삭제
+                                </Button>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <label className="inline-flex cursor-pointer items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50">
-                              {isBusy ? "처리 중..." : inspImage ? "교체" : "파일 선택"}
-                              <input
-                                type="file"
-                                accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-                                className="hidden"
-                                disabled={isBusy}
-                                onChange={(e) => {
-                                  void handleInspectionImageUpload(lastCreatedExpenseId, e.target.files?.[0]);
-                                  e.currentTarget.value = "";
-                                }}
-                              />
-                            </label>
-                            {inspImage && (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={isBusy}
-                                onClick={() => handleInspectionImageDelete(lastCreatedExpenseId, inspImage.id)}
-                              >
-                                삭제
-                              </Button>
-                            )}
-                          </div>
-                        </div>
+                        ))}
                       </div>
                     </div>
                   );
@@ -1150,7 +1169,7 @@ export default function ProjectExpensesPage() {
                   <p className="text-sm font-semibold text-blue-800">수정: {editingExpense.title}</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1 sm:col-span-2">
-                      <Label className="text-xs">예산항목명</Label>
+                      <Label className="text-xs">검수확인서 계약명</Label>
                       <Input value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))} />
                     </div>
 
@@ -1230,6 +1249,24 @@ export default function ProjectExpensesPage() {
                     <div className="space-y-1 sm:col-span-2">
                       <Label className="text-xs">비고</Label>
                       <Input value={editForm.note} onChange={e => setEditForm(f => ({ ...f, note: e.target.value }))} />
+                    </div>
+
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label className="text-xs">지출결의서 용도</Label>
+                      <Textarea
+                        rows={2}
+                        value={editForm.usagePurpose}
+                        onChange={e => setEditForm(f => ({ ...f, usagePurpose: e.target.value }))}
+                      />
+                    </div>
+
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label className="text-xs">지출결의서 구매목적</Label>
+                      <Textarea
+                        rows={2}
+                        value={editForm.purchasePurpose}
+                        onChange={e => setEditForm(f => ({ ...f, purchasePurpose: e.target.value }))}
+                      />
                     </div>
 
                     {editingExpense.category_type === "materials" && (() => {

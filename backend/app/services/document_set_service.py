@@ -45,6 +45,12 @@ from app.models.project import Project
 from app.models.template import Template
 from app.models.vendor import Vendor
 from app.models.vendor_pool import VendorTemplatePool
+from app.services.business_date_util import (
+    calc_comparative_quote_date,
+    calc_expense_resolution_date,
+    calc_quote_date,
+    parse_date,
+)
 from app.services.document_generator import DocumentGenerator
 from app.services.llm_service import get_llm_service
 
@@ -238,6 +244,15 @@ class DocumentSetService:
         if inspection_image_path:
             base_context["inspection_image_path"] = inspection_image_path
 
+        # 세금계산서 발행일(=expense_date) 기준 문서별 날짜 사전 계산
+        # 한 batch 내에서 견적·비교견적·지출결의서가 일관된 날짜를 갖도록 한 번만 계산
+        issue_date_obj = parse_date(expense.expense_date)
+        if issue_date_obj:
+            quote_d = calc_quote_date(issue_date_obj)
+            base_context["_doc_date_quote"] = quote_d
+            base_context["_doc_date_comparative_quote"] = calc_comparative_quote_date(issue_date_obj, quote_d)
+            base_context["_doc_date_expense_resolution"] = calc_expense_resolution_date(issue_date_obj)
+
         result = DocumentSetResult(
             expense_item_id=expense_id,
             category_type=expense.category_type,
@@ -268,6 +283,24 @@ class DocumentSetService:
 
         return result
 
+    def _apply_doc_type_date(
+        self,
+        doc_type: DocumentType,
+        base_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """문서 타입별로 사전 계산된 issue_date 오버라이드.
+        expense_date(=세금계산서 발행일)는 보존, issue_date 계열만 변경."""
+        ctx = {k: v for k, v in base_context.items() if not k.startswith("_doc_date_")}
+        override = base_context.get(f"_doc_date_{doc_type.value}")
+        if override is None:
+            return ctx
+        s = override.strftime("%Y-%m-%d")
+        ctx["issue_date"] = s
+        ctx["issue_date_year"] = override.year
+        ctx["issue_date_month"] = override.month
+        ctx["issue_date_day"] = override.day
+        return ctx
+
     async def _process_doc(
         self,
         doc_type: DocumentType,
@@ -281,6 +314,9 @@ class DocumentSetService:
         batch_id: str = "",
     ) -> DocSetItem:
 
+        # doc_type별 issue_date 오버라이드 (generate_set에서 사전 계산된 날짜 사용)
+        doc_context = self._apply_doc_type_date(doc_type, base_context)
+
         # ① 업체 바이너리 복사 (사업자등록증 / 통장사본)
         if doc_type in VENDOR_COPY_DOCS:
             return await self._include_vendor_copy(doc_type, vendor, expense, db, batch_id)
@@ -291,7 +327,7 @@ class DocumentSetService:
                 doc_type=doc_type,
                 vendor=vendor,
                 expense=expense,
-                context=base_context,
+                context=doc_context,
                 project_data=project_data,
                 generator=generator,
                 db=db,
@@ -303,7 +339,7 @@ class DocumentSetService:
             return await self._process_comparative(
                 expense=expense,
                 compare_vendor=compare_vendor,
-                base_context=base_context,
+                base_context=doc_context,
                 project_data=project_data,
                 generator=generator,
                 db=db,
@@ -325,7 +361,7 @@ class DocumentSetService:
             )
 
         # vendor 대표자 정보 보강 (검수확인서 등 내부 양식에서 vendor_representative 사용)
-        internal_ctx = dict(base_context)
+        internal_ctx = dict(doc_context)
         if vendor is not None:
             internal_ctx.setdefault(
                 "vendor_representative",

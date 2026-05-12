@@ -1153,7 +1153,7 @@ class DocumentGenerator:
                     elif _key in _SIGNATURE_KEYS:
                         _width = Mm(30)      # 서명: 30mm
                     elif _key in _PHOTO_KEYS:
-                        _width = Mm(120)     # 검수 사진: 120mm (셀 가득)
+                        _width = Mm(70)      # 검수 사진: 70mm (검수확인서 6칸 분할 셀 안에 맞춤)
                     else:
                         _width = Mm(80)
                     safe_context[_key] = InlineImage(tpl, _path, width=_width)
@@ -1209,17 +1209,31 @@ class DocumentGenerator:
             except (IndexError, Exception):
                 pass
 
-            # ── B) tbl2 세목 열 너비 재분배 ───────────────────────────────────
-            _NEW_W = {1: 1950, 2: 1350, 3: 1622, 4: 1350, 5: 1900}
+            # ── B) tbl2 세목 열 너비 재분배 + tblGrid 동기화 + noWrap ──────────
+            # 양식의 tblLayout="fixed"라 tblGrid가 절대적 우선 → tblGrid도 같이 수정
+            _NEW_W = {1: 1700, 2: 1700, 3: 1700, 4: 1700, 5: 1700}  # twips. 각 3.0cm. col[0] 라벨은 그대로
             try:
-                for row in doc.tables[2].rows:
+                tbl2 = doc.tables[2]
+                # B-1) tblGrid 안 col 너비 수정 (fixed layout이라 이게 우선)
+                tblGrid = tbl2._tbl.find(f"{{{_W_NS}}}tblGrid")
+                if tblGrid is not None:
+                    cols = list(tblGrid)
+                    for ci, new_w in _NEW_W.items():
+                        if ci < len(cols):
+                            cols[ci].set(f"{{{_W_NS}}}w", str(new_w))
+                # B-2) 각 셀의 tcW도 같이 수정 (visual 일관성)
+                for row in tbl2.rows:
                     for ci, new_w in _NEW_W.items():
                         if ci < len(row.cells):
-                            tcPr = row.cells[ci]._element.find(f"{{{_W_NS}}}tcPr")
+                            cell_elem = row.cells[ci]._element
+                            tcPr = cell_elem.find(f"{{{_W_NS}}}tcPr")
                             if tcPr is not None:
                                 tcW = tcPr.find(f"{{{_W_NS}}}tcW")
                                 if tcW is not None:
                                     tcW.set(f"{{{_W_NS}}}w", str(new_w))
+                                # noWrap 추가 (텍스트 줄바꿈 방지)
+                                if tcPr.find(f"{{{_W_NS}}}noWrap") is None:
+                                    noWrap = _etree.SubElement(tcPr, f"{{{_W_NS}}}noWrap")
             except (IndexError, Exception):
                 pass
 
@@ -1233,38 +1247,17 @@ class DocumentGenerator:
             except (IndexError, Exception):
                 pass
 
-            # ── D) 바닥 텍스트박스 — "대표이사 …… [대표명]" 기존 단락 앞에 삽입 ─
-            # 새 단락이 아닌 기존 (인) 단락에 run을 prepend → 한 줄로 유지
-            if representative_name:
-                try:
-                    for txbx in doc.element.body.iter(f"{{{_WPS_NS}}}txbx"):
-                        content = txbx.find(f"{{{_W_NS}}}txbxContent")
-                        if content is None:
-                            continue
-                        # 텍스트가 있는 단락을 찾음 (첫 번째 단락이 빈 경우 대비)
-                        target_p = None
-                        for p in content.findall(f"{{{_W_NS}}}p"):
-                            raw = "".join(
-                                t.text or "" for t in p.iter(f"{{{_W_NS}}}t")
-                            )
-                            if raw.strip():
-                                target_p = p
-                                break
-                        if target_p is None:
-                            continue
-                        # pPr 다음 위치에 새 run 삽입 (pPr이 없으면 맨 앞)
-                        pPr = target_p.find(f"{{{_W_NS}}}pPr")
-                        idx = (list(target_p).index(pPr) + 1) if pPr is not None else 0
-                        new_r = _etree.Element(f"{{{_W_NS}}}r")
-                        new_t = _etree.SubElement(new_r, f"{{{_W_NS}}}t")
-                        new_t.text = f"대표이사 ……  {representative_name}  "
-                        new_t.set(
-                            "{http://www.w3.org/XML/1998/namespace}space", "preserve"
-                        )
-                        target_p.insert(idx, new_r)
-                        break
-                except Exception:
-                    pass
+            # ── D) 텍스트박스 (인) 안 보이게 비움 (대표이사 텍스트는 F에서 paragraph로 통합) ─
+            try:
+                for txbx in doc.element.body.iter(f"{{{_WPS_NS}}}txbx"):
+                    content = txbx.find(f"{{{_W_NS}}}txbxContent")
+                    if content is None:
+                        continue
+                    # 텍스트박스 안 모든 t 노드 비우기
+                    for t in content.iter(f"{{{_W_NS}}}t"):
+                        t.text = ""
+            except Exception:
+                pass
 
             # ── E) 문장 오류 수정 "합니다고" → "하오니" ──────────────────────
             try:
@@ -1277,16 +1270,67 @@ class DocumentGenerator:
             except Exception:
                 pass
 
-            # ── F) 바닥 날짜 단락에 회사명 추가 (견본: "2025년 02월 11일  유담") ─
-            if company_name:
-                try:
-                    for para in doc.paragraphs:
-                        if _re.search(r"\d{4}년\s+\d{1,2}월\s+\d{1,2}일", para.text):
-                            if company_name not in para.text:
-                                para.add_run(f"     {company_name}")
-                            break
-                except Exception:
-                    pass
+            # ── F) 바닥 날짜 단락 — "■ " 추가(맨앞) + 회사명/대표이사/대표명 추가(끝) ─
+            # 견본: "■ 2025년 03월 19일      유담      대표이사    차승열 [도장]"
+            # 정렬은 양식 LEFT 그대로 (■ 글머리표가 다른 ■ 라인과 같은 좌측 시작)
+            try:
+                for para in doc.paragraphs:
+                    if _re.search(r"\d{4}년\s+\d{1,2}월\s+\d{1,2}일", para.text):
+                        # F-1) 맨 앞에 "■ " 추가 (없으면)
+                        if not para.text.lstrip().startswith("■"):
+                            new_r = _etree.Element(f"{{{_W_NS}}}r")
+                            new_t = _etree.SubElement(new_r, f"{{{_W_NS}}}t")
+                            new_t.text = "■ "
+                            new_t.set(
+                                "{http://www.w3.org/XML/1998/namespace}space", "preserve"
+                            )
+                            # paragraph 첫 run 앞에 insert
+                            first_run = None
+                            for child in para._element:
+                                if child.tag == f"{{{_W_NS}}}r":
+                                    first_run = child
+                                    break
+                            if first_run is not None:
+                                first_run.addprevious(new_r)
+                            else:
+                                para._element.append(new_r)
+
+                        # F-2) 끝에 회사명/대표이사/대표명 추가 (이미 들어있으면 skip)
+                        already_has = bool(
+                            company_name and company_name in para.text
+                            and (not representative_name or representative_name in para.text)
+                        )
+                        if not already_has and (company_name or representative_name):
+                            additional = ""
+                            if company_name and company_name not in para.text:
+                                additional += f"      {company_name}"
+                            if representative_name and representative_name not in para.text:
+                                additional += f"      대표이사    {representative_name}"
+                            if additional:
+                                para.add_run(additional)
+                        break
+            except Exception:
+                pass
+
+            # ── G) 바닥 영역 정렬 ─
+            # 견본은 ■ 글머리표가 다른 ■ 라인과 같은 좌측 시작. paragraph 정렬은 LEFT(기본) 유지.
+            # 텍스트박스 안 paragraph는 가운데 정렬 (안전 — 텍스트 비웠으니 시각 영향 없음)
+            try:
+                for txbx in doc.element.body.iter(f"{{{_WPS_NS}}}txbx"):
+                    content = txbx.find(f"{{{_W_NS}}}txbxContent")
+                    if content is None:
+                        continue
+                    for p in content.findall(f"{{{_W_NS}}}p"):
+                        pPr = p.find(f"{{{_W_NS}}}pPr")
+                        if pPr is None:
+                            pPr = _etree.SubElement(p, f"{{{_W_NS}}}pPr")
+                            p.insert(0, pPr)
+                        for jc in pPr.findall(f"{{{_W_NS}}}jc"):
+                            pPr.remove(jc)
+                        jc = _etree.SubElement(pPr, f"{{{_W_NS}}}jc")
+                        jc.set(f"{{{_W_NS}}}val", "center")
+            except Exception:
+                pass
 
             doc.save(docx_path)
         except Exception:

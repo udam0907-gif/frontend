@@ -526,6 +526,7 @@ export interface CompanySettingsUpdate {
   fax?: string;
   email?: string;
   seal_image_path?: string;
+  signature_image_path?: string;
   company_business_registration_path?: string;
   company_bank_copy_path?: string;
   company_quote_template_path?: string;

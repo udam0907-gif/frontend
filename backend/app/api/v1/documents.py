@@ -27,6 +27,63 @@ router = APIRouter(tags=["documents"])
 logger = get_logger(__name__)
 
 
+# === 다운로드 파일명 형식: {YYYYMMDD}_{업체}_{문서타입}.확장자 ===
+_DOCUMENT_TYPE_KOR = {
+    "quote": "견적서",
+    "comparative_quote": "비교견적서",
+    "transaction_statement": "거래명세서",
+    "expense_resolution": "지출결의서",
+    "inspection_confirmation": "검수확인서",
+    "vendor_business_registration": "사업자등록증",
+    "vendor_bank_copy": "통장사본",
+    "service_contract": "용역계약서",
+}
+
+_FILENAME_UNSAFE_CHARS = '\\/:*?"<>|'
+
+
+def _sanitize_filename_part(s: str) -> str:
+    """파일명에 쓰지 못하는 문자 제거 + 공백을 언더스코어로."""
+    cleaned = "".join(c for c in (s or "") if c not in _FILENAME_UNSAFE_CHARS)
+    cleaned = cleaned.replace(" ", "_").strip("_")
+    return cleaned
+
+
+def _build_download_filename(doc: GeneratedDocument, file_path: Path) -> str:
+    """{YYYYMMDD}_{업체명}_{문서타입}.확장자 — 정보 누락 시 기존 파일명 fallback."""
+    expense = doc.expense_item
+
+    # ① 날짜 (expense_date 우선, fallback to created_at)
+    date_str = ""
+    if expense and expense.expense_date:
+        raw = str(expense.expense_date).replace("-", "").replace(".", "").replace("/", "").replace(" ", "")
+        if len(raw) >= 8 and raw[:8].isdigit():
+            date_str = raw[:8]
+    if not date_str and doc.created_at:
+        date_str = doc.created_at.strftime("%Y%m%d")
+
+    # ② 업체명
+    vendor_name = ""
+    if expense and expense.vendor_name:
+        vendor_name = _sanitize_filename_part(expense.vendor_name)
+
+    # ③ 문서 타입 (generation_trace["document_type"])
+    trace = doc.generation_trace or {}
+    doc_type_value = trace.get("document_type") or ""
+    doc_type_kor = _DOCUMENT_TYPE_KOR.get(doc_type_value, doc_type_value)
+    doc_type_kor = _sanitize_filename_part(doc_type_kor)
+
+    # ④ 확장자
+    ext = file_path.suffix or ""
+
+    # ⑤ 조합 (빈 부분 제외)
+    parts = [p for p in (date_str, vendor_name, doc_type_kor) if p]
+    if not parts:
+        # 모든 정보 누락 시 원본 파일명 유지
+        return file_path.name
+    return "_".join(parts) + ext
+
+
 @router.post("/generate", response_model=GeneratedDocumentRead, status_code=status.HTTP_201_CREATED)
 async def generate_document(
     payload: GenerateDocumentRequest,
@@ -120,7 +177,9 @@ async def download_generated_document(
     db: AsyncSession = Depends(get_db),
 ) -> FileResponse:
     result = await db.execute(
-        select(GeneratedDocument).where(GeneratedDocument.id == document_id)
+        select(GeneratedDocument)
+        .options(selectinload(GeneratedDocument.expense_item))
+        .where(GeneratedDocument.id == document_id)
     )
     doc = result.scalar_one_or_none()
     if not doc:
@@ -134,9 +193,10 @@ async def download_generated_document(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="파일을 찾을 수 없습니다.",
         )
+    download_filename = _build_download_filename(doc, file_path)
     return FileResponse(
         path=str(file_path),
-        filename=file_path.name,
+        filename=download_filename,
         media_type="application/octet-stream",
     )
 

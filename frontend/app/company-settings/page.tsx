@@ -35,6 +35,7 @@ const emptyForm: CompanySettingsUpdate = {
   fax: "",
   email: "",
   seal_image_path: "",
+  signature_image_path: "",
   employee_count: null,
 };
 
@@ -44,6 +45,7 @@ const fileLabels: Record<CompanySettingsUploadType, string> = {
   quote_template: "견적서 양식",
   transaction_statement_template: "거래명세서 양식",
   seal_image: "직인 이미지",
+  signature_image: "서명 이미지",
 };
 
 const autoExtractFieldLabels: Record<keyof CompanySettingsExtractedFields, string> = {
@@ -125,6 +127,12 @@ const initialFileUiState = (): Record<CompanySettingsUploadType, FileUploadUiSta
     error: null,
   },
   seal_image: {
+    fileName: null,
+    stage: "idle",
+    message: "파일을 선택하거나 드래그해서 놓으면 즉시 업로드됩니다.",
+    error: null,
+  },
+  signature_image: {
     fileName: null,
     stage: "idle",
     message: "파일을 선택하거나 드래그해서 놓으면 즉시 업로드됩니다.",
@@ -229,6 +237,7 @@ export default function CompanySettingsPage() {
       fax: data.fax ?? "",
       email: data.email ?? "",
       seal_image_path: data.seal_image_path ?? "",
+      signature_image_path: data.signature_image_path ?? "",
       employee_count: data.employee_count ?? null,
       company_business_registration_path: data.company_business_registration_path ?? "",
       company_bank_copy_path: data.company_bank_copy_path ?? "",
@@ -341,6 +350,7 @@ export default function CompanySettingsPage() {
         ...prev,
         company_id: uploadedSettings.company_id || DEFAULT_COMPANY_ID,
         seal_image_path: uploadedSettings.seal_image_path ?? prev.seal_image_path,
+        signature_image_path: uploadedSettings.signature_image_path ?? prev.signature_image_path,
         company_business_registration_path:
           uploadedSettings.company_business_registration_path ?? prev.company_business_registration_path,
         company_bank_copy_path: uploadedSettings.company_bank_copy_path ?? prev.company_bank_copy_path,

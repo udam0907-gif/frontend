@@ -38,6 +38,7 @@ _STATUS_FIELD_MAP: dict[str, str] = {
     "quote_template": "company_quote_template_path",
     "transaction_statement_template": "company_transaction_statement_template_path",
     "seal_image": "seal_image_path",
+    "signature_image": "signature_image_path",
 }
 
 _ALLOWED_EXTENSIONS: dict[str, set[str]] = {
@@ -94,6 +95,7 @@ def _serialize_company_setting(company_setting: CompanySetting) -> CompanySettin
         fax=company_setting.fax,
         email=company_setting.email,
         seal_image_path=company_setting.seal_image_path,
+        signature_image_path=company_setting.signature_image_path,
         company_business_registration_path=company_setting.company_business_registration_path,
         company_bank_copy_path=company_setting.company_bank_copy_path,
         company_quote_template_path=company_setting.company_quote_template_path,

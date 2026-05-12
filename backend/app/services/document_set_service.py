@@ -867,12 +867,26 @@ class DocumentSetService:
         )
         if inspection_images:
             ctx["inspection_image_path"] = inspection_images[-1].file_path
-            # 검수확인서 docxtpl용 image_1 / image_2 (최신 2장)
-            ctx.setdefault("image_1", inspection_images[-1].file_path)
-            if len(inspection_images) >= 2:
-                ctx.setdefault("image_2", inspection_images[-2].file_path)
+            # 검수확인서 docxtpl용 image_1 / image_2
+            # 우선순위 1) extracted_data.slot_index 값 사용
+            # 우선순위 2) slot 미지정 문서 → 등록순서대로 image_1/image_2 배치
+            slotted: dict[int, str] = {}
+            unslotted: list[str] = []
+            for doc in inspection_images:
+                slot = (doc.extracted_data or {}).get("slot_index")
+                if slot in (1, 2):
+                    slotted[int(slot)] = doc.file_path
+                else:
+                    unslotted.append(doc.file_path)
+            image_1 = slotted.get(1) or (unslotted[0] if unslotted else "")
+            if slotted.get(1):
+                # slot 2 후보: 명시 slot 2 → 그 외 unslotted 첫번째
+                image_2 = slotted.get(2) or (unslotted[0] if unslotted else "")
             else:
-                ctx.setdefault("image_2", "")
+                # slot 1이 unslotted[0]로 채워졌다면 image_2는 slot 2 명시 또는 unslotted[1]
+                image_2 = slotted.get(2) or (unslotted[1] if len(unslotted) >= 2 else "")
+            ctx.setdefault("image_1", image_1)
+            ctx.setdefault("image_2", image_2)
         else:
             ctx.setdefault("image_1", "")
             ctx.setdefault("image_2", "")

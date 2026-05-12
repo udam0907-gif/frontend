@@ -134,6 +134,7 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     document_type: DocumentType = Form(...),
     file: UploadFile = File(...),
+    slot_index: int | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> ExpenseDocument:
     await _get_expense_or_404(expense_id, db)
@@ -170,14 +171,31 @@ async def upload_document(
                 ExpenseDocument.document_type == document_type,
             )
         )
-        for existing in existing_docs.scalars().all():
-            try:
-                Path(existing.file_path).unlink(missing_ok=True)
-            except OSError:
-                pass
-            await db.delete(existing)
+        existing_list = list(existing_docs.scalars().all())
+        if slot_index is not None:
+            # 슬롯 기반: 같은 슬롯의 기존 문서만 교체. 다른 슬롯은 보존.
+            for existing in existing_list:
+                existing_slot = (existing.extracted_data or {}).get("slot_index")
+                if existing_slot == slot_index:
+                    try:
+                        Path(existing.file_path).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    await db.delete(existing)
+        else:
+            # 슬롯 미지정(레거시): 종전대로 모두 삭제 후 단일 슬롯 사용.
+            for existing in existing_list:
+                try:
+                    Path(existing.file_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+                await db.delete(existing)
 
     Path(file_path).write_bytes(content)
+
+    initial_extracted: dict = {}
+    if slot_index is not None:
+        initial_extracted["slot_index"] = slot_index
 
     doc = ExpenseDocument(
         id=uuid.uuid4(),
@@ -188,7 +206,7 @@ async def upload_document(
         file_size=len(content),
         mime_type=file.content_type,
         upload_status=UploadStatus.uploaded,
-        extracted_data={},
+        extracted_data=initial_extracted,
     )
     db.add(doc)
     await db.flush()
@@ -206,6 +224,7 @@ async def upload_document(
         "expense_document_uploaded",
         expense_id=str(expense_id),
         doc_type=document_type.value,
+        slot_index=slot_index,
         size=len(content),
     )
     return doc
@@ -265,7 +284,11 @@ async def _extract_document_data_background(
             if not doc:
                 return
             extractor = DocumentExtractorService()
-            doc.extracted_data = extractor.extract(file_path, filename)
+            # 기존 extracted_data(slot_index 등 메타)를 보존하면서 추출 결과 병합
+            existing = dict(doc.extracted_data or {})
+            extracted = extractor.extract(file_path, filename) or {}
+            existing.update(extracted)
+            doc.extracted_data = existing
             await db.commit()
             logger.info("document_extraction_completed", document_id=str(document_id))
         except Exception as e:

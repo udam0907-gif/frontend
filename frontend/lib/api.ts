@@ -170,10 +170,18 @@ export const expensesApi = {
   delete: (id: string) =>
     apiClient.delete(`/expenses/${id}`).then((r) => r.data),
 
-  uploadDocument: (expenseId: string, documentType: string, file: File) => {
+  uploadDocument: (
+    expenseId: string,
+    documentType: string,
+    file: File,
+    slotIndex?: number,
+  ) => {
     const form = new FormData();
     form.append("file", file);
     form.append("document_type", documentType);
+    if (slotIndex !== undefined) {
+      form.append("slot_index", String(slotIndex));
+    }
     return apiClient
       .post(`/expenses/${expenseId}/documents`, form)
       .then((r) => r.data);

@@ -38,8 +38,8 @@ function formatExpenseTitle(expense: ExpenseItem): string {
 interface EditForm {
   title: string;
   amount: string;
-  quantity: string;
-  unitPrice: string;
+  // materials 전용: 등록 폼과 동일한 line_items 편집
+  lineItems: LineItem[];
   vendorId: string;
   vendorName: string;
   compareVendorId: string;
@@ -154,7 +154,8 @@ export default function ProjectExpensesPage() {
   // 수정/삭제 상태
   const [editingExpense, setEditingExpense] = useState<import("@/lib/types").ExpenseItem | null>(null);
   const [editForm, setEditForm] = useState<EditForm>({
-    title: "", amount: "", quantity: "", unitPrice: "",
+    title: "", amount: "",
+    lineItems: [{ id: "1", item_name: "", spec: "", quantity: "", unit_price: "" }],
     vendorId: "", vendorName: "", compareVendorId: "", expenseDate: "", note: "",
     usagePurpose: "", purchasePurpose: "",
   });
@@ -294,12 +295,40 @@ export default function ProjectExpensesPage() {
   const handleStartEdit = (expense: import("@/lib/types").ExpenseItem) => {
     const meta = expense.input_data ?? {};
     const isMaterials = expense.category_type === "materials";
+
+    // materials: 기존 line_items 복원. 없으면 단일 행 fallback (legacy quantity/unit_price).
+    let editLineItems: LineItem[];
+    if (isMaterials) {
+      const savedItems = Array.isArray(meta.line_items)
+        ? (meta.line_items as Array<Record<string, unknown>>)
+        : [];
+      if (savedItems.length > 0) {
+        editLineItems = savedItems.map((it, idx) => ({
+          id: `edit_${idx}_${Date.now()}`,
+          item_name: String(it.item_name ?? ""),
+          spec: String(it.spec ?? ""),
+          quantity: it.quantity != null ? String(it.quantity) : "",
+          unit_price: it.unit_price != null ? String(it.unit_price) : "",
+        }));
+      } else {
+        // legacy 단일 quantity/unit_price 데이터 호환
+        editLineItems = [{
+          id: `edit_legacy_${Date.now()}`,
+          item_name: "",
+          spec: "",
+          quantity: meta.quantity != null ? String(meta.quantity) : "",
+          unit_price: meta.unit_price != null ? String(meta.unit_price) : "",
+        }];
+      }
+    } else {
+      editLineItems = [{ id: "1", item_name: "", spec: "", quantity: "", unit_price: "" }];
+    }
+
     setEditingExpense(expense);
     setEditForm({
       title: expense.title,
       amount: isMaterials ? "" : String(expense.amount),
-      quantity: isMaterials ? String(meta.quantity ?? "") : "",
-      unitPrice: isMaterials ? String(meta.unit_price ?? "") : "",
+      lineItems: editLineItems,
       vendorId: (meta.vendor_id as string) ?? "",
       vendorName: expense.vendor_name ?? "",
       compareVendorId: (meta.compare_vendor_id as string) ?? "",
@@ -313,8 +342,28 @@ export default function ProjectExpensesPage() {
   const handleSaveEdit = () => {
     if (!editingExpense) return;
     const isMaterials = editingExpense.category_type === "materials";
+
+    // materials: line_items 합산. 그 외: 단일 amount.
+    const materialsLineItems = isMaterials
+      ? editForm.lineItems
+          .filter(it => it.item_name || it.spec || Number(it.quantity) > 0 || Number(it.unit_price) > 0)
+          .map(it => {
+            const qty = Number(it.quantity) || 0;
+            const up = Number(it.unit_price) || 0;
+            return {
+              item_name: it.item_name || undefined,
+              spec: it.spec || undefined,
+              quantity: qty || undefined,
+              unit_price: up || undefined,
+              amount: (qty * up) || undefined,
+            };
+          })
+      : [];
     const computedAmount = isMaterials
-      ? Number(editForm.quantity) * Number(editForm.unitPrice)
+      ? materialsLineItems.reduce(
+          (sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0),
+          0,
+        )
       : Number(editForm.amount);
     if (!computedAmount || computedAmount <= 0) {
       setMessage({ type: "error", text: "금액을 입력하세요." });
@@ -331,7 +380,12 @@ export default function ProjectExpensesPage() {
         ? { compare_vendor_id: editForm.compareVendorId, compare_amount: compareAmount }
         : { compare_vendor_id: undefined, compare_amount: undefined }),
       ...(isMaterials
-        ? { quantity: Number(editForm.quantity), unit_price: Number(editForm.unitPrice) }
+        ? {
+            line_items: materialsLineItems.length > 0 ? materialsLineItems : undefined,
+            // legacy 단일 quantity/unit_price 키는 line_items와 불일치 방지 위해 제거
+            quantity: undefined,
+            unit_price: undefined,
+          }
         : {}),
       usage_purpose: editForm.usagePurpose || undefined,
       purchase_purpose: editForm.purchasePurpose || undefined,
@@ -370,7 +424,11 @@ export default function ProjectExpensesPage() {
     return ["jpg", "jpeg", "png"].includes(ext ?? "");
   };
 
-  const handleInspectionImageUpload = async (expenseId: string, file: File | null | undefined) => {
+  const handleInspectionImageUpload = async (
+    expenseId: string,
+    file: File | null | undefined,
+    slotIndex: number = 1,
+  ) => {
     if (!file) return;
     if (!isAllowedInspectionImage(file)) {
       setInspectionMessage(expenseId, "error", "JPG, JPEG, PNG 파일만 업로드할 수 있습니다.");
@@ -380,8 +438,8 @@ export default function ProjectExpensesPage() {
     setInspectionUploadingId(expenseId);
     setInspectionMessage(expenseId, "info", `${file.name} 업로드 중...`);
     try {
-      await expensesApi.uploadDocument(expenseId, "inspection_photos", file);
-      setInspectionMessage(expenseId, "success", `${file.name} 업로드 완료`);
+      await expensesApi.uploadDocument(expenseId, "inspection_photos", file, slotIndex);
+      setInspectionMessage(expenseId, "success", `${file.name} 업로드 완료 (슬롯 ${slotIndex})`);
       await queryClient.invalidateQueries({ queryKey: ["expenses", projectId] });
     } catch (err) {
       setInspectionMessage(
@@ -831,7 +889,9 @@ export default function ProjectExpensesPage() {
                         </p>
                       )}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {slots.map((img, idx) => (
+                        {slots.map((img, idx) => {
+                          const slotIndex = idx + 1;
+                          return (
                           <div
                             key={idx}
                             className={`rounded-lg border-2 border-dashed px-3 py-3 text-sm transition ${
@@ -843,17 +903,11 @@ export default function ProjectExpensesPage() {
                               e.preventDefault();
                               const file = e.dataTransfer.files?.[0];
                               if (!file) return;
-                              if (img) {
-                                void expensesApi.deleteDocument(lastCreatedExpenseId, img.id).then(() =>
-                                  handleInspectionImageUpload(lastCreatedExpenseId, file)
-                                );
-                              } else {
-                                void handleInspectionImageUpload(lastCreatedExpenseId, file);
-                              }
+                              void handleInspectionImageUpload(lastCreatedExpenseId, file, slotIndex);
                             }}
                           >
                             <p className="text-xs font-semibold text-gray-700 mb-1">
-                              검수 이미지 {idx + 1} ({idx === 0 ? "image_1" : "image_2"})
+                              검수 이미지 {slotIndex} (image_{slotIndex})
                             </p>
                             <p className="text-xs text-gray-500 mb-2 truncate">
                               {img?.filename ?? "비어 있음 — 드래그 또는 파일 선택"}
@@ -870,13 +924,7 @@ export default function ProjectExpensesPage() {
                                     const file = e.target.files?.[0];
                                     e.currentTarget.value = "";
                                     if (!file) return;
-                                    if (img) {
-                                      void expensesApi.deleteDocument(lastCreatedExpenseId, img.id).then(() =>
-                                        handleInspectionImageUpload(lastCreatedExpenseId, file)
-                                      );
-                                    } else {
-                                      void handleInspectionImageUpload(lastCreatedExpenseId, file);
-                                    }
+                                    void handleInspectionImageUpload(lastCreatedExpenseId, file, slotIndex);
                                   }}
                                 />
                               </label>
@@ -893,7 +941,8 @@ export default function ProjectExpensesPage() {
                               )}
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -1174,24 +1223,106 @@ export default function ProjectExpensesPage() {
                     </div>
 
                     {editingExpense.category_type === "materials" ? (
-                      <>
-                        <div className="space-y-1">
-                          <Label className="text-xs">수량</Label>
-                          <Input type="number" value={editForm.quantity} onChange={e => setEditForm(f => ({ ...f, quantity: e.target.value }))} />
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label className="text-xs">품목 목록 (수량 × 단가)</Label>
+                        <div className="hidden sm:grid sm:grid-cols-[2fr_80px_120px_120px_110px_32px] gap-2 px-1">
+                          <span className="text-[10px] font-medium text-gray-500">상품명</span>
+                          <span className="text-[10px] font-medium text-gray-500">수량</span>
+                          <span className="text-[10px] font-medium text-gray-500">규격</span>
+                          <span className="text-[10px] font-medium text-gray-500">단가 (원)</span>
+                          <span className="text-[10px] font-medium text-gray-500">금액</span>
+                          <span />
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">단가 (원)</Label>
-                          <Input type="number" value={editForm.unitPrice} onChange={e => setEditForm(f => ({ ...f, unitPrice: e.target.value }))} />
+                        {editForm.lineItems.map((item, index) => {
+                          const rowAmount = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+                          return (
+                            <div key={item.id} className="grid grid-cols-2 sm:grid-cols-[2fr_80px_120px_120px_110px_32px] gap-2 items-center rounded-md border border-gray-100 p-2 sm:border-0 sm:p-0 bg-white">
+                              <div className="col-span-2 sm:col-span-1">
+                                <Input
+                                  placeholder="상품명"
+                                  value={item.item_name}
+                                  onChange={e => setEditForm(f => ({
+                                    ...f,
+                                    lineItems: f.lineItems.map((it, i) => i === index ? { ...it, item_name: e.target.value } : it),
+                                  }))}
+                                />
+                              </div>
+                              <Input
+                                type="number"
+                                placeholder="수량"
+                                min={0}
+                                value={item.quantity}
+                                onChange={e => setEditForm(f => ({
+                                  ...f,
+                                  lineItems: f.lineItems.map((it, i) => i === index ? { ...it, quantity: e.target.value } : it),
+                                }))}
+                              />
+                              <Input
+                                placeholder="규격"
+                                value={item.spec}
+                                onChange={e => setEditForm(f => ({
+                                  ...f,
+                                  lineItems: f.lineItems.map((it, i) => i === index ? { ...it, spec: e.target.value } : it),
+                                }))}
+                              />
+                              <Input
+                                type="number"
+                                placeholder="단가"
+                                min={0}
+                                value={item.unit_price}
+                                onChange={e => setEditForm(f => ({
+                                  ...f,
+                                  lineItems: f.lineItems.map((it, i) => i === index ? { ...it, unit_price: e.target.value } : it),
+                                }))}
+                              />
+                              <Input
+                                readOnly
+                                className="bg-gray-50 text-right font-semibold text-sm"
+                                value={rowAmount > 0 ? formatCurrency(rowAmount) : ""}
+                                placeholder="0"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setEditForm(f => ({
+                                  ...f,
+                                  lineItems: f.lineItems.filter((_, i) => i !== index),
+                                }))}
+                                disabled={editForm.lineItems.length === 1}
+                                className="flex items-center justify-center w-8 h-8 text-gray-300 hover:text-red-500 disabled:opacity-0 disabled:cursor-default"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                        <div className="flex items-center justify-between pt-1">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="text-xs"
+                            disabled={editForm.lineItems.length >= 10}
+                            onClick={() => setEditForm(f => ({
+                              ...f,
+                              lineItems: [...f.lineItems, { id: `edit_new_${Date.now()}`, item_name: "", spec: "", quantity: "", unit_price: "" }],
+                            }))}
+                          >
+                            <Plus className="w-3.5 h-3.5 mr-1" />
+                            상품 추가
+                          </Button>
+                          {(() => {
+                            const sum = editForm.lineItems.reduce(
+                              (s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0),
+                              0,
+                            );
+                            return sum > 0 ? (
+                              <span className="text-sm font-bold text-gray-800">
+                                합계: {formatCurrency(sum)}
+                              </span>
+                            ) : null;
+                          })()}
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">금액 (자동계산)</Label>
-                          <Input readOnly className="bg-white" value={
-                            editForm.quantity && editForm.unitPrice
-                              ? formatCurrency(Number(editForm.quantity) * Number(editForm.unitPrice))
-                              : ""
-                          } />
-                        </div>
-                      </>
+                      </div>
                     ) : (
                       <div className="space-y-1">
                         <Label className="text-xs">금액 (원)</Label>
@@ -1237,7 +1368,10 @@ export default function ProjectExpensesPage() {
                         </select>
                         {editForm.compareVendorId && (() => {
                           const baseAmt = editingExpense.category_type === "materials"
-                            ? Number(editForm.quantity) * Number(editForm.unitPrice)
+                            ? editForm.lineItems.reduce(
+                                (s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0),
+                                0,
+                              )
                             : Number(editForm.amount);
                           return baseAmt > 0 ? (
                             <p className="text-xs text-blue-600">비교견적 금액: {formatCurrency(Math.ceil(baseAmt * 1.1))}</p>

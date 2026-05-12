@@ -83,6 +83,7 @@ export interface ExpenseDocument {
   file_size?: number | null;
   mime_type?: string | null;
   upload_status: string;
+  extracted_data?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
 }

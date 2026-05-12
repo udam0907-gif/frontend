@@ -1206,270 +1206,305 @@ export default function ProjectExpensesPage() {
                             </td>
                           </tr>
                         )}
+                        {editingExpense?.id === expense.id && (
+                          <tr>
+                            <td colSpan={6} className="p-0">
+                              <div className="m-3 p-4 border border-blue-200 rounded-lg bg-blue-50 space-y-4">
+                                  <p className="text-sm font-semibold text-blue-800">수정: {editingExpense.title}</p>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="space-y-1 sm:col-span-2">
+                                      <Label className="text-xs">검수확인서 계약명</Label>
+                                      <Input value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))} />
+                                    </div>
+
+                                    {editingExpense.category_type === "materials" ? (
+                                      <div className="space-y-2 sm:col-span-2">
+                                        <Label className="text-xs">품목 목록 (수량 × 단가)</Label>
+                                        <div className="hidden sm:grid sm:grid-cols-[2fr_80px_120px_120px_110px_32px] gap-2 px-1">
+                                          <span className="text-[10px] font-medium text-gray-500">상품명</span>
+                                          <span className="text-[10px] font-medium text-gray-500">수량</span>
+                                          <span className="text-[10px] font-medium text-gray-500">규격</span>
+                                          <span className="text-[10px] font-medium text-gray-500">단가 (원)</span>
+                                          <span className="text-[10px] font-medium text-gray-500">금액</span>
+                                          <span />
+                                        </div>
+                                        {editForm.lineItems.map((item, index) => {
+                                          const rowAmount = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
+                                          return (
+                                            <div key={item.id} className="grid grid-cols-2 sm:grid-cols-[2fr_80px_120px_120px_110px_32px] gap-2 items-center rounded-md border border-gray-100 p-2 sm:border-0 sm:p-0 bg-white">
+                                              <div className="col-span-2 sm:col-span-1">
+                                                <Input
+                                                  placeholder="상품명"
+                                                  value={item.item_name}
+                                                  onChange={e => setEditForm(f => ({
+                                                    ...f,
+                                                    lineItems: f.lineItems.map((it, i) => i === index ? { ...it, item_name: e.target.value } : it),
+                                                  }))}
+                                                />
+                                              </div>
+                                              <Input
+                                                type="number"
+                                                placeholder="수량"
+                                                min={0}
+                                                value={item.quantity}
+                                                onChange={e => setEditForm(f => ({
+                                                  ...f,
+                                                  lineItems: f.lineItems.map((it, i) => i === index ? { ...it, quantity: e.target.value } : it),
+                                                }))}
+                                              />
+                                              <Input
+                                                placeholder="규격"
+                                                value={item.spec}
+                                                onChange={e => setEditForm(f => ({
+                                                  ...f,
+                                                  lineItems: f.lineItems.map((it, i) => i === index ? { ...it, spec: e.target.value } : it),
+                                                }))}
+                                              />
+                                              <Input
+                                                type="number"
+                                                placeholder="단가"
+                                                min={0}
+                                                value={item.unit_price}
+                                                onChange={e => setEditForm(f => ({
+                                                  ...f,
+                                                  lineItems: f.lineItems.map((it, i) => i === index ? { ...it, unit_price: e.target.value } : it),
+                                                }))}
+                                              />
+                                              <Input
+                                                readOnly
+                                                className="bg-gray-50 text-right font-semibold text-sm"
+                                                value={rowAmount > 0 ? formatCurrency(rowAmount) : ""}
+                                                placeholder="0"
+                                              />
+                                              <button
+                                                type="button"
+                                                onClick={() => setEditForm(f => ({
+                                                  ...f,
+                                                  lineItems: f.lineItems.filter((_, i) => i !== index),
+                                                }))}
+                                                disabled={editForm.lineItems.length === 1}
+                                                className="flex items-center justify-center w-8 h-8 text-gray-300 hover:text-red-500 disabled:opacity-0 disabled:cursor-default"
+                                              >
+                                                <X className="w-4 h-4" />
+                                              </button>
+                                            </div>
+                                          );
+                                        })}
+                                        <div className="flex items-center justify-between pt-1">
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className="text-xs"
+                                            disabled={editForm.lineItems.length >= 10}
+                                            onClick={() => setEditForm(f => ({
+                                              ...f,
+                                              lineItems: [...f.lineItems, { id: `edit_new_${Date.now()}`, item_name: "", spec: "", quantity: "", unit_price: "" }],
+                                            }))}
+                                          >
+                                            <Plus className="w-3.5 h-3.5 mr-1" />
+                                            상품 추가
+                                          </Button>
+                                          {(() => {
+                                            const sum = editForm.lineItems.reduce(
+                                              (s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0),
+                                              0,
+                                            );
+                                            return sum > 0 ? (
+                                              <span className="text-sm font-bold text-gray-800">
+                                                합계: {formatCurrency(sum)}
+                                              </span>
+                                            ) : null;
+                                          })()}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-1">
+                                        <Label className="text-xs">금액 (원)</Label>
+                                        <Input type="number" value={editForm.amount} onChange={e => setEditForm(f => ({ ...f, amount: e.target.value }))} />
+                                      </div>
+                                    )}
+
+                                    <div className="space-y-1">
+                                      <Label className="text-xs">세금계산서 발행일자</Label>
+                                      <Input type="date" value={editForm.expenseDate} onChange={e => setEditForm(f => ({ ...f, expenseDate: e.target.value }))} />
+                                    </div>
+
+                                    <div className="space-y-1">
+                                      <Label className="text-xs">주업체</Label>
+                                      <select
+                                        className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm"
+                                        value={editForm.vendorId}
+                                        onChange={e => {
+                                          const v = (vendors ?? []).find(x => x.id === e.target.value);
+                                          setEditForm(f => ({ ...f, vendorId: e.target.value, vendorName: v?.name ?? "" }));
+                                        }}
+                                      >
+                                        <option value="">-- 업체 선택 --</option>
+                                        {(vendors ?? []).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                                      </select>
+                                    </div>
+
+                                    {COMPARATIVE_CATEGORIES.includes(editingExpense.category_type) && (
+                                      <div className="space-y-1 sm:col-span-2">
+                                        <Label className="text-xs">
+                                          비교견적업체{" "}
+                                          <span className="font-normal text-gray-400">(선택 시 금액 × 1.1 자동계산)</span>
+                                        </Label>
+                                        <select
+                                          className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm"
+                                          value={editForm.compareVendorId}
+                                          onChange={e => setEditForm(f => ({ ...f, compareVendorId: e.target.value }))}
+                                        >
+                                          <option value="">-- 비교견적업체 선택 --</option>
+                                          {(vendors ?? []).filter(v => v.id !== editForm.vendorId).map(v => (
+                                            <option key={v.id} value={v.id}>{v.name}</option>
+                                          ))}
+                                        </select>
+                                        {editForm.compareVendorId && (() => {
+                                          const baseAmt = editingExpense.category_type === "materials"
+                                            ? editForm.lineItems.reduce(
+                                                (s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0),
+                                                0,
+                                              )
+                                            : Number(editForm.amount);
+                                          return baseAmt > 0 ? (
+                                            <p className="text-xs text-blue-600">비교견적 금액: {formatCurrency(Math.ceil(baseAmt * 1.1))}</p>
+                                          ) : null;
+                                        })()}
+                                      </div>
+                                    )}
+
+                                    <div className="space-y-1 sm:col-span-2">
+                                      <Label className="text-xs">비고</Label>
+                                      <Input value={editForm.note} onChange={e => setEditForm(f => ({ ...f, note: e.target.value }))} />
+                                    </div>
+
+                                    <div className="space-y-1 sm:col-span-2">
+                                      <Label className="text-xs">지출결의서 용도</Label>
+                                      <Textarea
+                                        rows={2}
+                                        value={editForm.usagePurpose}
+                                        onChange={e => setEditForm(f => ({ ...f, usagePurpose: e.target.value }))}
+                                      />
+                                    </div>
+
+                                    <div className="space-y-1 sm:col-span-2">
+                                      <Label className="text-xs">지출결의서 구매목적</Label>
+                                      <Textarea
+                                        rows={2}
+                                        value={editForm.purchasePurpose}
+                                        onChange={e => setEditForm(f => ({ ...f, purchasePurpose: e.target.value }))}
+                                      />
+                                    </div>
+
+                                    {editingExpense.category_type === "materials" && (() => {
+                                      const currentExpense = (expenses ?? []).find(e => e.id === editingExpense.id) ?? editingExpense;
+                                      const allInsp = (currentExpense.documents ?? [])
+                                        .filter(doc => doc.document_type === "inspection_photos")
+                                        .slice()
+                                        .sort((a, b) => new Date(a.created_at ?? "").getTime() - new Date(b.created_at ?? "").getTime());
+                                      const bySlot: Record<number, typeof allInsp[number]> = {};
+                                      const unslotted: typeof allInsp = [];
+                                      for (const d of allInsp) {
+                                        const raw = (d.extracted_data ?? {}) as Record<string, unknown>;
+                                        const slot = typeof raw.slot_index === "number" ? raw.slot_index : undefined;
+                                        if (slot === 1 || slot === 2) bySlot[slot] = d;
+                                        else unslotted.push(d);
+                                      }
+                                      // legacy 데이터: slot_index 없는 문서를 빈 슬롯에 채워줌
+                                      const resolvedSlots: Array<typeof allInsp[number] | null> = [
+                                        bySlot[1] ?? unslotted[0] ?? null,
+                                        bySlot[2] ?? (bySlot[1] ? (unslotted[0] ?? null) : (unslotted[1] ?? null)),
+                                      ];
+                                      const inspMsg = inspectionMessages[editingExpense.id];
+                                      const isBusy = inspectionUploadingId === editingExpense.id;
+                                      return (
+                                        <div className="space-y-2 sm:col-span-2">
+                                          <Label className="text-xs">검수 이미지 (최대 2장)</Label>
+                                          <p className="text-[11px] text-gray-500 -mt-1">
+                                            검수확인서의 image_1 / image_2 자리에 자동 삽입됩니다.
+                                          </p>
+                                          {inspMsg && (
+                                            <p className={`text-xs ${
+                                              inspMsg.type === "error" ? "text-red-600"
+                                              : inspMsg.type === "success" ? "text-green-700"
+                                              : "text-blue-600"
+                                            }`}>
+                                              {inspMsg.text}
+                                            </p>
+                                          )}
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            {resolvedSlots.map((img, idx) => {
+                                              const slotIndex = idx + 1;
+                                              return (
+                                                <div
+                                                  key={slotIndex}
+                                                  className="rounded-lg border-2 border-dashed border-gray-200 bg-white px-3 py-2"
+                                                  onDragOver={e => { e.preventDefault(); setInspectionDragId(editingExpense.id); }}
+                                                  onDragLeave={() => setInspectionDragId(null)}
+                                                  onDrop={e => {
+                                                    e.preventDefault();
+                                                    const file = e.dataTransfer.files?.[0];
+                                                    if (file) void handleInspectionImageUpload(editingExpense.id, file, slotIndex);
+                                                  }}
+                                                >
+                                                  <p className="text-[11px] font-semibold text-gray-700">
+                                                    검수 이미지 {slotIndex} (image_{slotIndex})
+                                                  </p>
+                                                  <p className="text-[11px] text-gray-500 truncate mb-1.5">
+                                                    {img?.filename ?? "비어 있음 — 드래그 또는 파일 선택"}
+                                                  </p>
+                                                  <div className="flex items-center gap-1">
+                                                    <label className="cursor-pointer inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium hover:bg-gray-50">
+                                                      {isBusy ? "처리 중..." : img ? "교체" : "파일 선택"}
+                                                      <input
+                                                        type="file"
+                                                        accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                                                        className="hidden"
+                                                        disabled={isBusy}
+                                                        onChange={e => {
+                                                          const file = e.target.files?.[0];
+                                                          e.currentTarget.value = "";
+                                                          if (file) void handleInspectionImageUpload(editingExpense.id, file, slotIndex);
+                                                        }}
+                                                      />
+                                                    </label>
+                                                    {img && (
+                                                      <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant="outline"
+                                                        disabled={isBusy}
+                                                        onClick={() => handleInspectionImageDelete(editingExpense.id, img.id)}
+                                                      >
+                                                        삭제
+                                                      </Button>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      );
+                                    })()}
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <Button size="sm" onClick={handleSaveEdit} disabled={updateMutation.isPending}>
+                                      {updateMutation.isPending ? "저장 중..." : "저장"}
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={() => setEditingExpense(null)}>취소</Button>
+                                  </div>
+                                </div>
+                            </td>
+                          </tr>
+                        )}
                       </Fragment>
                     );
                   })}
                 </tbody>
               </table>
-
-              {/* 인라인 수정 패널 */}
-              {editingExpense && (
-                <div className="mt-4 p-4 border border-blue-200 rounded-lg bg-blue-50 space-y-4">
-                  <p className="text-sm font-semibold text-blue-800">수정: {editingExpense.title}</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1 sm:col-span-2">
-                      <Label className="text-xs">검수확인서 계약명</Label>
-                      <Input value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))} />
-                    </div>
-
-                    {editingExpense.category_type === "materials" ? (
-                      <div className="space-y-2 sm:col-span-2">
-                        <Label className="text-xs">품목 목록 (수량 × 단가)</Label>
-                        <div className="hidden sm:grid sm:grid-cols-[2fr_80px_120px_120px_110px_32px] gap-2 px-1">
-                          <span className="text-[10px] font-medium text-gray-500">상품명</span>
-                          <span className="text-[10px] font-medium text-gray-500">수량</span>
-                          <span className="text-[10px] font-medium text-gray-500">규격</span>
-                          <span className="text-[10px] font-medium text-gray-500">단가 (원)</span>
-                          <span className="text-[10px] font-medium text-gray-500">금액</span>
-                          <span />
-                        </div>
-                        {editForm.lineItems.map((item, index) => {
-                          const rowAmount = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
-                          return (
-                            <div key={item.id} className="grid grid-cols-2 sm:grid-cols-[2fr_80px_120px_120px_110px_32px] gap-2 items-center rounded-md border border-gray-100 p-2 sm:border-0 sm:p-0 bg-white">
-                              <div className="col-span-2 sm:col-span-1">
-                                <Input
-                                  placeholder="상품명"
-                                  value={item.item_name}
-                                  onChange={e => setEditForm(f => ({
-                                    ...f,
-                                    lineItems: f.lineItems.map((it, i) => i === index ? { ...it, item_name: e.target.value } : it),
-                                  }))}
-                                />
-                              </div>
-                              <Input
-                                type="number"
-                                placeholder="수량"
-                                min={0}
-                                value={item.quantity}
-                                onChange={e => setEditForm(f => ({
-                                  ...f,
-                                  lineItems: f.lineItems.map((it, i) => i === index ? { ...it, quantity: e.target.value } : it),
-                                }))}
-                              />
-                              <Input
-                                placeholder="규격"
-                                value={item.spec}
-                                onChange={e => setEditForm(f => ({
-                                  ...f,
-                                  lineItems: f.lineItems.map((it, i) => i === index ? { ...it, spec: e.target.value } : it),
-                                }))}
-                              />
-                              <Input
-                                type="number"
-                                placeholder="단가"
-                                min={0}
-                                value={item.unit_price}
-                                onChange={e => setEditForm(f => ({
-                                  ...f,
-                                  lineItems: f.lineItems.map((it, i) => i === index ? { ...it, unit_price: e.target.value } : it),
-                                }))}
-                              />
-                              <Input
-                                readOnly
-                                className="bg-gray-50 text-right font-semibold text-sm"
-                                value={rowAmount > 0 ? formatCurrency(rowAmount) : ""}
-                                placeholder="0"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setEditForm(f => ({
-                                  ...f,
-                                  lineItems: f.lineItems.filter((_, i) => i !== index),
-                                }))}
-                                disabled={editForm.lineItems.length === 1}
-                                className="flex items-center justify-center w-8 h-8 text-gray-300 hover:text-red-500 disabled:opacity-0 disabled:cursor-default"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            </div>
-                          );
-                        })}
-                        <div className="flex items-center justify-between pt-1">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="text-xs"
-                            disabled={editForm.lineItems.length >= 10}
-                            onClick={() => setEditForm(f => ({
-                              ...f,
-                              lineItems: [...f.lineItems, { id: `edit_new_${Date.now()}`, item_name: "", spec: "", quantity: "", unit_price: "" }],
-                            }))}
-                          >
-                            <Plus className="w-3.5 h-3.5 mr-1" />
-                            상품 추가
-                          </Button>
-                          {(() => {
-                            const sum = editForm.lineItems.reduce(
-                              (s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0),
-                              0,
-                            );
-                            return sum > 0 ? (
-                              <span className="text-sm font-bold text-gray-800">
-                                합계: {formatCurrency(sum)}
-                              </span>
-                            ) : null;
-                          })()}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-1">
-                        <Label className="text-xs">금액 (원)</Label>
-                        <Input type="number" value={editForm.amount} onChange={e => setEditForm(f => ({ ...f, amount: e.target.value }))} />
-                      </div>
-                    )}
-
-                    <div className="space-y-1">
-                      <Label className="text-xs">세금계산서 발행일자</Label>
-                      <Input type="date" value={editForm.expenseDate} onChange={e => setEditForm(f => ({ ...f, expenseDate: e.target.value }))} />
-                    </div>
-
-                    <div className="space-y-1">
-                      <Label className="text-xs">주업체</Label>
-                      <select
-                        className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm"
-                        value={editForm.vendorId}
-                        onChange={e => {
-                          const v = (vendors ?? []).find(x => x.id === e.target.value);
-                          setEditForm(f => ({ ...f, vendorId: e.target.value, vendorName: v?.name ?? "" }));
-                        }}
-                      >
-                        <option value="">-- 업체 선택 --</option>
-                        {(vendors ?? []).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                      </select>
-                    </div>
-
-                    {COMPARATIVE_CATEGORIES.includes(editingExpense.category_type) && (
-                      <div className="space-y-1 sm:col-span-2">
-                        <Label className="text-xs">
-                          비교견적업체{" "}
-                          <span className="font-normal text-gray-400">(선택 시 금액 × 1.1 자동계산)</span>
-                        </Label>
-                        <select
-                          className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm"
-                          value={editForm.compareVendorId}
-                          onChange={e => setEditForm(f => ({ ...f, compareVendorId: e.target.value }))}
-                        >
-                          <option value="">-- 비교견적업체 선택 --</option>
-                          {(vendors ?? []).filter(v => v.id !== editForm.vendorId).map(v => (
-                            <option key={v.id} value={v.id}>{v.name}</option>
-                          ))}
-                        </select>
-                        {editForm.compareVendorId && (() => {
-                          const baseAmt = editingExpense.category_type === "materials"
-                            ? editForm.lineItems.reduce(
-                                (s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0),
-                                0,
-                              )
-                            : Number(editForm.amount);
-                          return baseAmt > 0 ? (
-                            <p className="text-xs text-blue-600">비교견적 금액: {formatCurrency(Math.ceil(baseAmt * 1.1))}</p>
-                          ) : null;
-                        })()}
-                      </div>
-                    )}
-
-                    <div className="space-y-1 sm:col-span-2">
-                      <Label className="text-xs">비고</Label>
-                      <Input value={editForm.note} onChange={e => setEditForm(f => ({ ...f, note: e.target.value }))} />
-                    </div>
-
-                    <div className="space-y-1 sm:col-span-2">
-                      <Label className="text-xs">지출결의서 용도</Label>
-                      <Textarea
-                        rows={2}
-                        value={editForm.usagePurpose}
-                        onChange={e => setEditForm(f => ({ ...f, usagePurpose: e.target.value }))}
-                      />
-                    </div>
-
-                    <div className="space-y-1 sm:col-span-2">
-                      <Label className="text-xs">지출결의서 구매목적</Label>
-                      <Textarea
-                        rows={2}
-                        value={editForm.purchasePurpose}
-                        onChange={e => setEditForm(f => ({ ...f, purchasePurpose: e.target.value }))}
-                      />
-                    </div>
-
-                    {editingExpense.category_type === "materials" && (() => {
-                      const currentExpense = (expenses ?? []).find(e => e.id === editingExpense.id) ?? editingExpense;
-                      const inspImage = currentExpense.documents?.find(doc => doc.document_type === "inspection_photos");
-                      const inspMsg = inspectionMessages[editingExpense.id];
-                      const isBusy = inspectionUploadingId === editingExpense.id;
-                      const isDrag = inspectionDragId === editingExpense.id;
-                      return (
-                        <div className="space-y-1 sm:col-span-2">
-                          <Label className="text-xs">검수 이미지</Label>
-                          <div
-                            className={`rounded-lg border-2 border-dashed p-3 transition ${isDrag ? "border-amber-400 bg-amber-50" : "border-gray-200 bg-white"}`}
-                            onDragOver={e => { e.preventDefault(); setInspectionDragId(editingExpense.id); }}
-                            onDragLeave={() => setInspectionDragId(null)}
-                            onDrop={e => {
-                              e.preventDefault();
-                              void handleInspectionImageUpload(editingExpense.id, e.dataTransfer.files?.[0]);
-                            }}
-                          >
-                            <div className="flex items-center justify-between gap-2 flex-wrap">
-                              <span className="text-xs text-gray-600">
-                                {inspImage ? `현재 파일: ${inspImage.filename}` : "등록된 검수 이미지 없음 — 드래그 또는 파일 선택"}
-                              </span>
-                              <div className="flex items-center gap-1">
-                                <label className="cursor-pointer inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium hover:bg-gray-50">
-                                  {isBusy ? "처리 중..." : inspImage ? "교체" : "파일 선택"}
-                                  <input
-                                    type="file"
-                                    accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-                                    className="hidden"
-                                    disabled={isBusy}
-                                    onChange={e => {
-                                      void handleInspectionImageUpload(editingExpense.id, e.target.files?.[0]);
-                                      e.currentTarget.value = "";
-                                    }}
-                                  />
-                                </label>
-                                {inspImage && (
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={isBusy}
-                                    onClick={() => handleInspectionImageDelete(editingExpense.id, inspImage.id)}
-                                  >
-                                    삭제
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                            {inspMsg && (
-                              <p className={`mt-1 text-xs ${inspMsg.type === "error" ? "text-red-600" : inspMsg.type === "success" ? "text-green-700" : "text-blue-600"}`}>
-                                {inspMsg.text}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={handleSaveEdit} disabled={updateMutation.isPending}>
-                      {updateMutation.isPending ? "저장 중..." : "저장"}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => setEditingExpense(null)}>취소</Button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </CardContent>
